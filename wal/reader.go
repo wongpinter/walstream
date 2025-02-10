@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/rs/zerolog"
 
 	"repo.nusatek.id/sugeng/walstreamer/decoder/pgoutput"
@@ -126,7 +125,6 @@ func (r *Reader) Start(ctx context.Context) error {
 
 func (r *Reader) processWALMessages(ctx context.Context) error {
 	nextStandbyMessageDeadline := time.Now().Add(r.standbyTimeout)
-	inStream := false
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -200,7 +198,7 @@ func (r *Reader) processWALMessages(ctx context.Context) error {
 			}
 
 		case pglogrepl.XLogDataByteID:
-			if err := r.handleXLogData(ctx, msg.Data[1:], &inStream); err != nil {
+			if err := r.handleXLogData(msg.Data[1:]); err != nil {
 				return err
 			}
 		}
@@ -226,7 +224,7 @@ func (r *Reader) handleKeepaliveMessage(data []byte) error {
 	return nil
 }
 
-func (r *Reader) handleXLogData(ctx context.Context, data []byte, inStream *bool) error {
+func (r *Reader) handleXLogData(data []byte) error {
 	xld, err := pglogrepl.ParseXLogData(data)
 	if err != nil {
 		return fmt.Errorf("failed to parse XLogData: %w", err)
@@ -252,33 +250,4 @@ func (r *Reader) handleXLogData(ctx context.Context, data []byte, inStream *bool
 	}
 
 	return nil
-}
-
-func (r *Reader) getTypeName(oid uint32) string {
-	switch oid {
-	case pgtype.TextOID:
-		return "text"
-	case pgtype.VarcharOID:
-		return "varchar"
-	case pgtype.Int8OID:
-		return "bigint"
-	case pgtype.Int4OID:
-		return "integer"
-	case pgtype.Float8OID:
-		return "double precision"
-	case pgtype.TimestampOID:
-		return "timestamp"
-	case pgtype.TimestamptzOID:
-		return "timestamptz"
-	case pgtype.DateOID:
-		return "date"
-	case pgtype.BoolOID:
-		return "boolean"
-	case pgtype.JSONBOID:
-		return "jsonb"
-	case pgtype.JSONOID:
-		return "json"
-	default:
-		return fmt.Sprintf("unknown_%d", oid)
-	}
 }
