@@ -16,6 +16,8 @@ replication:
     - name: public.inventory
       operations: ["INSERT", "UPDATE", "DELETE"]
   standby_timeout: 10
+  initial_sync: true
+  batch_size: 1000
 
 broker:
   type: nats
@@ -27,7 +29,7 @@ broker:
 
 lsn:
   type: file
-  path: /tmp/walstreamer.lsn
+  path: /tmp/walstreamer/lsn
   persist_interval: 5s
 
 log:

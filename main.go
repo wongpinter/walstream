@@ -19,6 +19,7 @@ import (
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
 	"repo.nusatek.id/sugeng/walstreamer/model"
 	"repo.nusatek.id/sugeng/walstreamer/replication"
+	"repo.nusatek.id/sugeng/walstreamer/sync"
 	"repo.nusatek.id/sugeng/walstreamer/wal"
 )
 
@@ -94,8 +95,30 @@ func main() {
 	}
 	defer replManager.Close(context.Background())
 
+	// Setup replication first
 	if err := replManager.Setup(context.Background()); err != nil {
 		log.Fatal().Err(err).Msg("Failed to setup replication")
+	}
+
+	// Check if LSN file exists and handle initial sync
+	if cfg.Replication.InitialSync {
+		lsnExists, err := storage.Exists()
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to check LSN file")
+		}
+
+		if !lsnExists {
+			log.Info().Msg("LSN file not found, starting initial sync")
+			syncer := sync.NewInitialSyncer(cfg, broker, log.Logger)
+			if err := syncer.Start(context.Background()); err != nil {
+				log.Fatal().Err(err).Msg("failed to perform initial sync")
+			}
+			// Set initial LSN after sync completes
+			if err := storage.Set(cfg.Replication.PublicationName, 0); err != nil {
+				log.Fatal().Err(err).Msg("failed to set initial LSN")
+			}
+			log.Info().Msg("initial sync completed")
+		}
 	}
 
 	// Create WAL reader config

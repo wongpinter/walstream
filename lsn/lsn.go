@@ -17,6 +17,8 @@ type Storage interface {
 	Set(publication string, lsn uint64) error
 	// Close releases any resources held by the storage
 	Close() error
+	// Exists checks if any LSN state files exist in the storage directory
+	Exists() (bool, error)
 }
 
 // LSNState represents the state of LSN processing
@@ -27,34 +29,27 @@ type LSNState struct {
 
 // FileStorage implements Storage interface using file-based persistence
 type FileStorage struct {
-	dir      string
-	states   map[string]LSNState
-	mu       sync.RWMutex
-	interval time.Duration // Interval for persisting to disk
-	done     chan struct{}
+	dir    string
+	states map[string]LSNState
+	mu     sync.RWMutex
 }
 
 // NewFileStorage creates a new file-based LSN storage
-func NewFileStorage(dir string, persistInterval time.Duration) (*FileStorage, error) {
+func NewFileStorage(dir string, _ time.Duration) (*FileStorage, error) {
 	// Create directory if it doesn't exist
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	fs := &FileStorage{
-		dir:      dir,
-		states:   make(map[string]LSNState),
-		interval: persistInterval,
-		done:     make(chan struct{}),
+		dir:    dir,
+		states: make(map[string]LSNState),
 	}
 
 	// Load existing states
 	if err := fs.loadStates(); err != nil {
 		return nil, err
 	}
-
-	// Start periodic persistence
-	go fs.persistPeriodically()
 
 	return fs, nil
 }
@@ -73,11 +68,21 @@ func (fs *FileStorage) Get(publication string) (uint64, error) {
 // Set updates the last processed LSN for a given publication
 func (fs *FileStorage) Set(publication string, lsn uint64) error {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	fs.states[publication] = LSNState{
 		LSN:       lsn,
 		UpdatedAt: time.Now(),
+	}
+	fs.mu.Unlock()
+
+	// Write directly to file without waiting for states
+	data, err := json.Marshal(fs.states[publication])
+	if err != nil {
+		return fmt.Errorf("failed to marshal LSN state for %s: %w", publication, err)
+	}
+
+	filename := filepath.Join(fs.dir, publication+".lsn")
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return fmt.Errorf("failed to write LSN file %s: %w", filename, err)
 	}
 
 	return nil
@@ -85,8 +90,32 @@ func (fs *FileStorage) Set(publication string, lsn uint64) error {
 
 // Close releases any resources and ensures final state is persisted
 func (fs *FileStorage) Close() error {
-	close(fs.done)
-	return fs.persist()
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	for pub, state := range fs.states {
+		data, err := json.Marshal(state)
+		if err != nil {
+			return fmt.Errorf("failed to marshal LSN state for %s: %w", pub, err)
+		}
+
+		filename := filepath.Join(fs.dir, pub+".lsn")
+		if err := os.WriteFile(filename, data, 0644); err != nil {
+			return fmt.Errorf("failed to write LSN file %s: %w", filename, err)
+		}
+	}
+
+	return nil
+}
+
+// Exists checks if any LSN state files exist in the storage directory
+func (fs *FileStorage) Exists() (bool, error) {
+	pattern := filepath.Join(fs.dir, "*.lsn")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return false, fmt.Errorf("failed to check LSN files: %w", err)
+	}
+	return len(matches) > 0, nil
 }
 
 // loadStates loads LSN states from disk
@@ -115,42 +144,4 @@ func (fs *FileStorage) loadStates() error {
 	}
 
 	return nil
-}
-
-// persist writes current states to disk
-func (fs *FileStorage) persist() error {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
-	for pub, state := range fs.states {
-		data, err := json.Marshal(state)
-		if err != nil {
-			return fmt.Errorf("failed to marshal LSN state for %s: %w", pub, err)
-		}
-
-		filename := filepath.Join(fs.dir, pub+".lsn")
-		if err := os.WriteFile(filename, data, 0644); err != nil {
-			return fmt.Errorf("failed to write LSN file %s: %w", filename, err)
-		}
-	}
-
-	return nil
-}
-
-// persistPeriodically periodically persists states to disk
-func (fs *FileStorage) persistPeriodically() {
-	ticker := time.NewTicker(fs.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-fs.done:
-			return
-		case <-ticker.C:
-			if err := fs.persist(); err != nil {
-				// Log error but continue
-				fmt.Printf("Error persisting LSN states: %v\n", err)
-			}
-		}
-	}
 }

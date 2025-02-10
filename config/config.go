@@ -45,6 +45,8 @@ type ReplicationConfig struct {
 	Tables          []string      `koanf:"tables"`        // For backward compatibility
 	TableConfigs    []TableConfig `koanf:"table_configs"` // New table-specific configurations
 	DefaultOps      []string      `koanf:"default_ops"`   // Default operations for tables without specific config
+	InitialSync     bool          `koanf:"initial_sync"`  // Whether to sync existing data on first run
+	BatchSize       int           `koanf:"batch_size"`    // Batch size for initial sync, default 1000
 }
 
 func (c *ReplicationConfig) Validate() error {
@@ -87,6 +89,10 @@ func (c *ReplicationConfig) Validate() error {
 				}
 			}
 		}
+	}
+
+	if c.BatchSize <= 0 {
+		c.BatchSize = 1000 // Set default batch size
 	}
 
 	return nil
