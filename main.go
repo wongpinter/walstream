@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
+	"repo.nusatek.id/sugeng/walstreamer/lsn"
 	"repo.nusatek.id/sugeng/walstreamer/model"
 	"repo.nusatek.id/sugeng/walstreamer/replication"
 	"repo.nusatek.id/sugeng/walstreamer/wal"
@@ -31,6 +32,13 @@ func main() {
 		IncludedTables:  []string{}, // empty means all tables
 		ExcludedTables:  []string{}, // no excluded tables
 	}
+
+	// Initialize LSN storage
+	lsnStorage, err := lsn.NewFileStorage("./data/lsn", 5*time.Second)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize LSN storage")
+	}
+	defer lsnStorage.Close()
 
 	// Initialize replication manager
 	replManager := replication.NewManager(replConfig)
@@ -54,6 +62,7 @@ func main() {
 		SlotName:        replConfig.SlotName,
 		StandbyTimeout:  10 * time.Second,
 		Logger:          logger,
+		LSNStorage:      lsnStorage,
 	}
 
 	// Create message handler that publishes to broker

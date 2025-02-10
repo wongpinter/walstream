@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"repo.nusatek.id/sugeng/walstreamer/model"
+	"repo.nusatek.id/sugeng/walstreamer/lsn"
 )
 
 // Reader is responsible for reading and processing WAL entries
@@ -27,6 +28,7 @@ type Reader struct {
 	slotName        string
 	config          Config
 	messageHandler  func(*model.Message) error
+	lsnStorage      lsn.Storage
 }
 
 // Config holds the configuration for the WAL reader
@@ -36,6 +38,7 @@ type Config struct {
 	SlotName        string
 	StandbyTimeout  time.Duration
 	Logger          zerolog.Logger
+	LSNStorage      lsn.Storage
 }
 
 // NewReader creates a new WAL reader
@@ -53,6 +56,7 @@ func NewReader(config Config, handler func(*model.Message) error) *Reader {
 		logger:          config.Logger,
 		config:          config,
 		messageHandler:  handler,
+		lsnStorage:      config.LSNStorage,
 	}
 }
 
@@ -70,10 +74,25 @@ func (r *Reader) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to identify system: %w", err)
 	}
-	r.clientXLogPos = sysident.XLogPos
+
+	// Get last processed LSN from storage
+	lastLSN, err := r.lsnStorage.Get(r.publicationName)
+	if err != nil {
+		return fmt.Errorf("failed to get last LSN: %w", err)
+	}
+
+	// If we have a stored LSN, start from there
+	if lastLSN > 0 {
+		r.clientXLogPos = pglogrepl.LSN(lastLSN)
+		r.logger.Info().
+			Uint64("lsn", lastLSN).
+			Msg("resuming from last processed LSN")
+	} else {
+		r.clientXLogPos = sysident.XLogPos
+	}
 
 	// Start replication
-	err = pglogrepl.StartReplication(ctx, r.conn, r.slotName, sysident.XLogPos, pglogrepl.StartReplicationOptions{
+	err = pglogrepl.StartReplication(ctx, r.conn, r.slotName, r.clientXLogPos, pglogrepl.StartReplicationOptions{
 		PluginArgs: []string{
 			"proto_version '2'",
 			fmt.Sprintf("publication_names '%s'", r.publicationName),
@@ -268,6 +287,10 @@ func (r *Reader) handleBeginMessage(msg *pglogrepl.BeginMessage) error {
 }
 
 func (r *Reader) handleCommitMessage(msg *pglogrepl.CommitMessage) error {
+	// Update LSN storage with commit LSN
+	if err := r.lsnStorage.Set(r.publicationName, uint64(msg.CommitLSN)); err != nil {
+		return fmt.Errorf("failed to update LSN storage: %w", err)
+	}
 	return r.messageHandler(&model.Message{
 		Operation: "COMMIT",
 		LSN:       uint64(msg.CommitLSN),
