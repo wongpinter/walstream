@@ -1,17 +1,24 @@
+# Database configuration
 database:
-  host: Cosmic-Echo.local
-  port: 5432
-  user: guest
-  password: guest
-  dbname: local
-  sslmode: disable
+  host: Cosmic-Echo.local # PostgreSQL server hostname
+  port: 5432 # PostgreSQL server port
+  user: guest # PostgreSQL username
+  password: guest # PostgreSQL password
+  dbname: local # PostgreSQL database name
+  sslmode: disable # SSL mode (disable, require, verify-ca, verify-full)
 
+# Log configuration
+log:
+  level: info # Log level (debug, info, warn, error)
+  format: console # Log format (console, json)
+
+# Replication configuration
 replication:
-  publication_name: walstreamer_pub
-  slot_name: walstreamer_slot
-  standby_timeout: 10 # in seconds
-  tables:
-    - public.inventory
+  publication_name: walstreamer_pub # PostgreSQL publication name
+  slot_name: walstreamer_slot # PostgreSQL replication slot name
+  standby_timeout: 10 # Timeout for standby status updates (in seconds)
+  tables: # List of tables to replicate
+    - public.inventory # Format: schema.table
   default_ops:
     - INSERT
     - UPDATE
@@ -19,30 +26,43 @@ replication:
   table_configs:
     - name: public.inventory
       operations: ["INSERT", "UPDATE", "DELETE"]
-  reconnect:
-    max_attempts: 0  # 0 means unlimited
-    initial_delay: 1  # in seconds
-    max_delay: 30    # in seconds
-  initial_sync: true
-  batch_size: 1000
+  reconnect: # Reconnection settings for PostgreSQL
+    max_attempts: 0 # Maximum reconnection attempts (0 means unlimited)
+    initial_delay: 1 # Initial delay between reconnection attempts (in seconds)
+    max_delay: 30 # Maximum delay between reconnection attempts (in seconds)
+  initial_sync: true # Whether to perform initial table sync
+  batch_size: 1000 # Number of changes to process in a batch
 
+# Message broker configuration
 broker:
+  # Broker type (Options: inmemory, nats, pubsub)
+  # - inmemory: In-memory broker for testing
+  # - nats: NATS message broker
+  # - pubsub: Google Cloud Pub/Sub
   type: nats
-  hosts:
+
+  # NATS specific configuration
+  # Required when type is "nats"
+  hosts: # List of NATS server hosts
     - nats://Cosmic-Echo.local:4222
-  topic: walstreamer.changes
-  username: ""
-  password: ""
+  topic: walstreamer.changes # NATS subject/topic name
+  username: "" # Optional NATS username
+  password: "" # Optional NATS password
 
+  # Google Cloud Pub/Sub specific configuration
+  # Required when type is "pubsub"
+  pubsub:
+    project_id: "your-project-id" # Google Cloud project ID
+    topic_id: "walstreamer-changes" # Pub/Sub topic ID
+    credentials_file: "/path/to/credentials.json" # Path to Google Cloud service account JSON key file
+
+# LSN (Log Sequence Number) persistence configuration
 lsn:
-  type: file
-  path: /tmp/walstreamer/lsn
-  persist_interval: 5s
+  type: file # LSN storage type (file, postgres)
+  path: /tmp/walstreamer/lsn # Path to LSN storage file (required when type is "file")
+  persist_interval: 5s # How often to persist LSN to storage (in seconds)
 
-log:
-  level: debug
-  format: console
-
+# Storage configuration
 storage:
-  type: file
-  path: /tmp/walstreamer
+  type: file # Storage type (file)
+  path: /tmp/walstreamer # Path to storage directory (required when type is "file")

@@ -106,13 +106,51 @@ func (c *ReplicationConfig) Validate() error {
 	return nil
 }
 
-// BrokerConfig holds message broker configuration
+// BrokerConfig holds broker-related configuration
 type BrokerConfig struct {
-	Type     string   `koanf:"type"` // inmemory, kafka, nats
-	Hosts    []string `koanf:"hosts"`
-	Topic    string   `koanf:"topic"`
-	Username string   `koanf:"username"`
-	Password string   `koanf:"password"`
+	Type     string   `koanf:"type"`     // Broker type (inmemory, nats, pubsub)
+	Hosts    []string `koanf:"hosts"`    // List of broker hosts
+	Topic    string   `koanf:"topic"`    // Topic/subject name
+	Username string   `koanf:"username"` // Optional username for authentication
+	Password string   `koanf:"password"` // Optional password for authentication
+	PubSub   struct {
+		ProjectID       string `koanf:"project_id"`       // Google Cloud project ID
+		TopicID        string `koanf:"topic_id"`         // Pub/Sub topic ID
+		CredentialsFile string `koanf:"credentials_file"` // Path to JSON credentials file
+	} `koanf:"pubsub"`
+}
+
+// Validate checks if the broker configuration is valid
+func (c *BrokerConfig) Validate() error {
+	if c.Type == "" {
+		return fmt.Errorf("broker type is required")
+	}
+
+	switch c.Type {
+	case "inmemory":
+		// No additional validation needed
+	case "nats":
+		if len(c.Hosts) == 0 {
+			return fmt.Errorf("at least one NATS host is required")
+		}
+		if c.Topic == "" {
+			return fmt.Errorf("NATS topic is required")
+		}
+	case "pubsub":
+		if c.PubSub.ProjectID == "" {
+			return fmt.Errorf("Google Cloud project ID is required")
+		}
+		if c.PubSub.TopicID == "" {
+			return fmt.Errorf("Pub/Sub topic ID is required")
+		}
+		if c.PubSub.CredentialsFile == "" {
+			return fmt.Errorf("path to credentials file is required")
+		}
+	default:
+		return fmt.Errorf("unsupported broker type: %s", c.Type)
+	}
+
+	return nil
 }
 
 // LSNConfig holds LSN persistence configuration
