@@ -35,72 +35,50 @@ type DatabaseConfig struct {
 type TableConfig struct {
 	Name       string   `koanf:"name"`       // Table name in format schema.table
 	Operations []string `koanf:"operations"` // List of operations to capture
+	Topic      string   `koanf:"topic"`      // Optional topic override for this table
 }
 
 // ReplicationConfig holds configuration for WAL replication
 type ReplicationConfig struct {
-	PublicationName string            `koanf:"publication_name"` // Name of the PostgreSQL publication
-	SlotName        string            `koanf:"slot_name"`        // Name of the replication slot
-	StandbyTimeout  int               `koanf:"standby_timeout"`  // Standby timeout in seconds
-	Tables          []string          `koanf:"tables"`           // List of tables to replicate
-	TableConfigs    []TableConfig     `koanf:"table_configs"`    // Table-specific configurations
-	DefaultOps      []string          `koanf:"default_ops"`      // Default operations for tables without specific config
-	InitialSync     bool              `koanf:"initial_sync"`     // Whether to sync existing data on first run
-	BatchSize       int               `koanf:"batch_size"`       // Batch size for initial sync, default 1000
-	Reconnect       ReconnectConfig   `koanf:"reconnect"`        // Reconnection settings
-}
-
-// ReconnectConfig holds configuration for reconnection settings
-type ReconnectConfig struct {
-	MaxAttempts   int `koanf:"max_attempts"`   // Maximum number of reconnection attempts (0 = unlimited)
-	InitialDelay  int `koanf:"initial_delay"`  // Initial delay between attempts in seconds
-	MaxDelay      int `koanf:"max_delay"`      // Maximum delay between attempts in seconds
+	PublicationName string        `koanf:"publication_name"` // PostgreSQL publication name
+	SlotName        string        `koanf:"slot_name"`        // PostgreSQL replication slot name
+	StandbyTimeout  int           `koanf:"standby_timeout"`  // Timeout for standby status updates (in seconds)
+	Tables          []TableConfig `koanf:"tables"`           // List of tables to replicate
+	DefaultOps      []string      `koanf:"default_ops"`      // Default operations to capture
+	InitialSync     bool          `koanf:"initial_sync"`     // Whether to perform initial table sync
+	BatchSize       int           `koanf:"batch_size"`       // Number of changes to process in a batch
+	Reconnect       struct {
+		MaxAttempts  int `koanf:"max_attempts"`  // Maximum reconnection attempts (0 means unlimited)
+		InitialDelay int `koanf:"initial_delay"` // Initial delay between reconnection attempts (in seconds)
+		MaxDelay     int `koanf:"max_delay"`     // Maximum delay between reconnection attempts (in seconds)
+	} `koanf:"reconnect"`
 }
 
 func (c *ReplicationConfig) Validate() error {
 	if c.PublicationName == "" {
-		return fmt.Errorf("publication_name is required")
+		return fmt.Errorf("publication name is required")
 	}
 	if c.SlotName == "" {
-		return fmt.Errorf("slot_name is required")
+		return fmt.Errorf("slot name is required")
 	}
 	if c.StandbyTimeout <= 0 {
-		return fmt.Errorf("standby_timeout must be positive")
+		return fmt.Errorf("standby timeout must be positive")
 	}
-
-	// Validate operations
-	validOps := map[string]bool{"INSERT": true, "UPDATE": true, "DELETE": true}
-
-	// Validate default operations
-	for _, op := range c.DefaultOps {
-		if !validOps[op] {
-			return fmt.Errorf("invalid default operation: %s", op)
-		}
+	if len(c.Tables) == 0 {
+		return fmt.Errorf("at least one table must be configured")
 	}
-
-	// If no default operations specified, use all
-	if len(c.DefaultOps) == 0 {
-		c.DefaultOps = []string{"INSERT", "UPDATE", "DELETE"}
-	}
-
-	// Validate table configs
-	for _, tc := range c.TableConfigs {
-		if tc.Name == "" {
-			return fmt.Errorf("table name is required in table_configs")
-		}
-		if len(tc.Operations) == 0 {
-			tc.Operations = c.DefaultOps
-		} else {
-			for _, op := range tc.Operations {
-				if !validOps[op] {
-					return fmt.Errorf("invalid operation '%s' for table %s", op, tc.Name)
-				}
-			}
-		}
-	}
-
 	if c.BatchSize <= 0 {
-		c.BatchSize = 1000 // Set default batch size
+		return fmt.Errorf("batch size must be positive")
+	}
+
+	// Validate each table configuration
+	for _, table := range c.Tables {
+		if table.Name == "" {
+			return fmt.Errorf("table name is required")
+		}
+		if len(table.Operations) == 0 && len(c.DefaultOps) == 0 {
+			return fmt.Errorf("operations must be specified either in table config or default_ops")
+		}
 	}
 
 	return nil
@@ -110,13 +88,14 @@ func (c *ReplicationConfig) Validate() error {
 type BrokerConfig struct {
 	Type     string   `koanf:"type"`     // Broker type (inmemory, nats, pubsub)
 	Hosts    []string `koanf:"hosts"`    // List of broker hosts
-	Topic    string   `koanf:"topic"`    // Topic/subject name
+	Topic    string   `koanf:"topic"`    // Default topic/subject name
 	Username string   `koanf:"username"` // Optional username for authentication
 	Password string   `koanf:"password"` // Optional password for authentication
 	PubSub   struct {
 		ProjectID       string `koanf:"project_id"`       // Google Cloud project ID
-		TopicID        string `koanf:"topic_id"`         // Pub/Sub topic ID
+		TopicPrefix    string `koanf:"topic_prefix"`     // Prefix for auto-generated topics (e.g., "walstreamer-")
 		CredentialsFile string `koanf:"credentials_file"` // Path to JSON credentials file
+		AutoCreateTopic bool   `koanf:"auto_create_topic"` // Whether to automatically create topics
 	} `koanf:"pubsub"`
 }
 
@@ -139,9 +118,6 @@ func (c *BrokerConfig) Validate() error {
 	case "pubsub":
 		if c.PubSub.ProjectID == "" {
 			return fmt.Errorf("Google Cloud project ID is required")
-		}
-		if c.PubSub.TopicID == "" {
-			return fmt.Errorf("Pub/Sub topic ID is required")
 		}
 		if c.PubSub.CredentialsFile == "" {
 			return fmt.Errorf("path to credentials file is required")

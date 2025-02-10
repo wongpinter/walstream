@@ -17,19 +17,28 @@ replication:
   publication_name: walstreamer_pub # PostgreSQL publication name
   slot_name: walstreamer_slot # PostgreSQL replication slot name
   standby_timeout: 10 # Timeout for standby status updates (in seconds)
-  tables: # List of tables to replicate
-    - public.inventory # Format: schema.table
+
+  # List of tables to replicate with their configurations
+  tables:
+    - name: public.inventory
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: inventory # Topic for this table's changes
+    - name: public.users
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: users # Topic for this table's changes
+
+  # Default operations if not specified in table config
   default_ops:
     - INSERT
     - UPDATE
     - DELETE
-  table_configs:
-    - name: public.inventory
-      operations: ["INSERT", "UPDATE", "DELETE"]
-  reconnect: # Reconnection settings for PostgreSQL
+
+  # Reconnection settings for PostgreSQL
+  reconnect:
     max_attempts: 0 # Maximum reconnection attempts (0 means unlimited)
     initial_delay: 1 # Initial delay between reconnection attempts (in seconds)
     max_delay: 30 # Maximum delay between reconnection attempts (in seconds)
+
   initial_sync: true # Whether to perform initial table sync
   batch_size: 1000 # Number of changes to process in a batch
 
@@ -43,9 +52,9 @@ broker:
 
   # NATS specific configuration
   # Required when type is "nats"
-  hosts: # List of NATS server hosts
+  hosts:
     - nats://Cosmic-Echo.local:4222
-  topic: walstreamer.changes # NATS subject/topic name
+  topic: walstreamer.changes # Default topic name (used for tables without specific topic)
   username: "" # Optional NATS username
   password: "" # Optional NATS password
 
@@ -53,8 +62,9 @@ broker:
   # Required when type is "pubsub"
   pubsub:
     project_id: "your-project-id" # Google Cloud project ID
-    topic_id: "walstreamer-changes" # Pub/Sub topic ID
+    topic_prefix: "walstreamer-" # Prefix for auto-generated topics (e.g., walstreamer-inventory)
     credentials_file: "/path/to/credentials.json" # Path to Google Cloud service account JSON key file
+    auto_create_topic: true # Automatically create topics if they don't exist
 
 # LSN (Log Sequence Number) persistence configuration
 lsn:

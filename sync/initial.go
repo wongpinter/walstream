@@ -42,7 +42,7 @@ func (s *InitialSyncer) Start(ctx context.Context) error {
 	defer s.conn.Close(ctx)
 
 	// Get list of tables to sync
-	tables, err := s.getTargetTables()
+	tables, err := s.getTables()
 	if err != nil {
 		return fmt.Errorf("failed to get target tables: %w", err)
 	}
@@ -57,25 +57,21 @@ func (s *InitialSyncer) Start(ctx context.Context) error {
 	return nil
 }
 
-// getTargetTables returns the list of tables to sync
-func (s *InitialSyncer) getTargetTables() ([]string, error) {
+// getTables returns a list of tables to sync
+func (s *InitialSyncer) getTables() ([]string, error) {
 	var tables []string
 	seen := make(map[string]bool)
 
-	// Process table configs first
-	for _, tc := range s.cfg.Replication.TableConfigs {
-		if !seen[tc.Name] {
-			tables = append(tables, tc.Name)
-			seen[tc.Name] = true
+	// Add tables from configuration
+	for _, table := range s.cfg.Replication.Tables {
+		if table.Name != "" && !seen[table.Name] {
+			tables = append(tables, table.Name)
+			seen[table.Name] = true
 		}
 	}
 
-	// Process legacy table list
-	for _, t := range s.cfg.Replication.Tables {
-		if t != "" && t[0] != '!' && !seen[t] { // Skip empty, excluded, and already seen tables
-			tables = append(tables, t)
-			seen[t] = true
-		}
+	if len(tables) == 0 {
+		return nil, fmt.Errorf("no tables configured for initial sync")
 	}
 
 	return tables, nil
