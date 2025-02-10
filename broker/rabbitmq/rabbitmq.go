@@ -2,9 +2,11 @@ package rabbitmq
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -16,345 +18,229 @@ import (
 
 // RabbitMQBroker implements the broker.Broker interface for RabbitMQ
 type RabbitMQBroker struct {
-	config       broker.BrokerConfig
-	rabbitCfg    Config
-	conn         *amqp.Connection
-	ch           *amqp.Channel
-	validators   []broker.MessageValidator
-	transformers []broker.MessageTransformer
-	metrics      broker.BrokerMetrics
-	msgChan      chan *model.Message
-	batchChan    chan []*model.Message
-	done         chan struct{}
-	wg           sync.WaitGroup
+	config Config
+	pool   *connectionPool
+	stats  *brokerStats
+
+	// Message handling
+	messages  chan *model.Message
+	batchChan chan []*model.Message
+	done      chan struct{}
+	wg        sync.WaitGroup
+
+	// Resource management
+	memUsage    atomic.Int64
+	workerCount atomic.Int32
+	isShutdown  atomic.Bool
+}
+
+// connectionPool manages a pool of RabbitMQ connections
+type connectionPool struct {
+	mu          sync.RWMutex
+	connections []*amqp.Connection
+	channels    map[*amqp.Connection][]*amqp.Channel
+	config      Config
+}
+
+// brokerStats holds runtime statistics
+type brokerStats struct {
+	messagesPublished atomic.Int64
+	publishErrors     atomic.Int64
+	reconnectCount    atomic.Int64
+	lastError         atomic.Value
+	lastPublishTime   atomic.Int64
 }
 
 // NewRabbitMQBroker creates a new RabbitMQ broker instance
-func NewRabbitMQBroker(brokerConfig broker.BrokerConfig, rabbitConfig Config) (*RabbitMQBroker, error) {
-	if err := rabbitConfig.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid RabbitMQ configuration: %w", err)
+func NewRabbitMQBroker(cfg Config) (*RabbitMQBroker, error) {
+	pool, err := newConnectionPool(cfg)
+	if err != nil {
+		return nil, errors.New("failed to create connection pool: " + err.Error())
 	}
 
 	b := &RabbitMQBroker{
-		config:       brokerConfig,
-		rabbitCfg:    rabbitConfig,
-		validators:   make([]broker.MessageValidator, 0),
-		transformers: make([]broker.MessageTransformer, 0),
-		msgChan:      make(chan *model.Message, brokerConfig.BufferSize),
-		batchChan:    make(chan []*model.Message, brokerConfig.BatchConfig.Size),
-		done:         make(chan struct{}),
+		config:    cfg,
+		pool:      pool,
+		stats:     &brokerStats{},
+		messages:  make(chan *model.Message, cfg.MaxQueueSize),
+		batchChan: make(chan []*model.Message),
+		done:      make(chan struct{}),
 	}
 
-	if err := b.connect(); err != nil {
-		return nil, err
-	}
+	// Start resource monitoring
+	go b.monitorResources()
 
-	b.startBatchWorkers()
-	go b.reconnectLoop()
+	// Start worker pool
+	b.startWorkers()
 
 	return b, nil
 }
 
-// connect establishes connection to RabbitMQ and sets up exchange and queue
-func (b *RabbitMQBroker) connect() error {
-	conn, err := amqp.Dial(b.rabbitCfg.URL())
-	if err != nil {
-		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
-	}
-
-	ch, err := conn.Channel()
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to open channel: %w", err)
-	}
-
-	// Set QoS
-	if err := ch.Qos(
-		b.rabbitCfg.PrefetchCount,
-		b.rabbitCfg.PrefetchSize,
-		b.rabbitCfg.PrefetchGlobal,
-	); err != nil {
-		ch.Close()
-		conn.Close()
-		return fmt.Errorf("failed to set QoS: %w", err)
-	}
-
-	// Declare exchange
-	if err := ch.ExchangeDeclare(
-		b.rabbitCfg.ExchangeName,
-		b.rabbitCfg.ExchangeType,
-		b.rabbitCfg.Durable,
-		b.rabbitCfg.AutoDelete,
-		false, // internal
-		false, // no-wait
-		nil,   // arguments
-	); err != nil {
-		ch.Close()
-		conn.Close()
-		return fmt.Errorf("failed to declare exchange: %w", err)
-	}
-
-	// Declare queue
-	_, err = ch.QueueDeclare(
-		b.rabbitCfg.QueueName,
-		b.rabbitCfg.QueueDurable,
-		b.rabbitCfg.QueueAutoDelete,
-		b.rabbitCfg.Exclusive,
-		false, // no-wait
-		nil,   // arguments
-	)
-	if err != nil {
-		ch.Close()
-		conn.Close()
-		return fmt.Errorf("failed to declare queue: %w", err)
-	}
-
-	// Bind queue to exchange
-	err = ch.QueueBind(
-		b.rabbitCfg.QueueName,
-		b.rabbitCfg.RoutingKey,
-		b.rabbitCfg.ExchangeName,
-		false, // no-wait
-		nil,   // arguments
-	)
-	if err != nil {
-		ch.Close()
-		conn.Close()
-		return fmt.Errorf("failed to bind queue: %w", err)
-	}
-
-	b.conn = conn
-	b.ch = ch
-
-	return nil
-}
-
-// reconnectLoop handles reconnection to RabbitMQ
-func (b *RabbitMQBroker) reconnectLoop() {
-	for {
-		select {
-		case <-b.done:
-			return
-		case <-b.conn.NotifyClose(make(chan *amqp.Error)):
-			log.Error().Msg("Lost connection to RabbitMQ, attempting to reconnect...")
-
-			for {
-				err := b.connect()
-				if err == nil {
-					log.Info().Msg("Successfully reconnected to RabbitMQ")
-					break
-				}
-
-				log.Error().Err(err).Msg("Failed to reconnect to RabbitMQ")
-				select {
-				case <-b.done:
-					return
-				case <-time.After(b.rabbitCfg.ReconnectDelay):
-				}
-			}
-		}
-	}
-}
-
-// startBatchWorkers starts the batch processing workers
-func (b *RabbitMQBroker) startBatchWorkers() {
-	b.wg.Add(b.config.BatchConfig.Workers)
-	for i := 0; i < b.config.BatchConfig.Workers; i++ {
-		go b.batchWorker()
-	}
-}
-
-// batchWorker processes message batches
-func (b *RabbitMQBroker) batchWorker() {
-	defer b.wg.Done()
-
-	batch := make([]*model.Message, 0, b.config.BatchConfig.Size)
-	timer := time.NewTimer(b.config.BatchConfig.FlushInterval)
-
-	for {
-		select {
-		case msg := <-b.msgChan:
-			batch = append(batch, msg)
-			if len(batch) >= b.config.BatchConfig.Size {
-				b.processBatch(batch)
-				batch = make([]*model.Message, 0, b.config.BatchConfig.Size)
-				timer.Reset(b.config.BatchConfig.FlushInterval)
-			}
-		case <-timer.C:
-			if len(batch) > 0 {
-				b.processBatch(batch)
-				batch = make([]*model.Message, 0, b.config.BatchConfig.Size)
-			}
-			timer.Reset(b.config.BatchConfig.FlushInterval)
-		case <-b.done:
-			if len(batch) > 0 {
-				b.processBatch(batch)
-			}
-			return
-		}
-	}
-}
-
-// processBatch processes a batch of messages
-func (b *RabbitMQBroker) processBatch(messages []*model.Message) {
-	start := time.Now()
-	published := 0
-
-	for _, msg := range messages {
-		if err := b.validateMessage(msg); err != nil {
-			log.Error().Err(err).Msg("Message validation failed")
-			b.metrics.MessagesFailed++
-			continue
-		}
-
-		transformed, err := b.transformMessage(msg)
-		if err != nil {
-			log.Error().Err(err).Msg("Message transformation failed")
-			b.metrics.MessagesFailed++
-			continue
-		}
-
-		data, err := json.Marshal(transformed.ToFormat(b.config.Format))
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to marshal message")
-			b.metrics.MessagesFailed++
-			continue
-		}
-
-		err = b.ch.PublishWithContext(
-			context.Background(),
-			b.rabbitCfg.ExchangeName,
-			b.rabbitCfg.RoutingKey,
-			b.rabbitCfg.Mandatory,
-			b.rabbitCfg.Immediate,
-			amqp.Publishing{
-				ContentType:  b.rabbitCfg.ContentType,
-				Body:         data,
-				DeliveryMode: amqp.Persistent,
-				Timestamp:    time.Now(),
-			},
-		)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to publish message")
-			b.metrics.MessagesFailed++
-			continue
-		}
-
-		published++
-	}
-
-	b.updateMetrics(published, time.Since(start))
-}
-
-// validateMessage applies all validators to a message
-func (b *RabbitMQBroker) validateMessage(msg *model.Message) error {
-	for _, validator := range b.validators {
-		if err := validator(msg); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// transformMessage applies all transformers to a message
-func (b *RabbitMQBroker) transformMessage(msg *model.Message) (*model.Message, error) {
-	current := msg
-	for _, transformer := range b.transformers {
-		transformed, err := transformer(current)
-		if err != nil {
-			return nil, err
-		}
-		current = transformed
-	}
-	return current, nil
-}
-
-// updateMetrics updates broker metrics
-func (b *RabbitMQBroker) updateMetrics(count int, duration time.Duration) {
-	b.metrics.MessagesPublished += int64(count)
-	b.metrics.BatchesPublished++
-	b.metrics.AverageLatency = (b.metrics.AverageLatency + duration) / 2
-	b.metrics.LastPublishTime = time.Now()
-	b.metrics.LastSuccessfulTime = time.Now()
-	b.metrics.BufferSize = len(b.msgChan)
-}
-
-// Publish publishes a single message
+// Publish publishes a message to RabbitMQ
 func (b *RabbitMQBroker) Publish(ctx context.Context, msg *model.Message) error {
-	if msg == nil {
-		return fmt.Errorf("cannot publish nil message")
+	if b.isShutdown.Load() {
+		return broker.ErrBrokerClosed
+	}
+
+	// Check memory usage
+	if b.memUsage.Load() > int64(b.config.MaxMemoryMB)*1024*1024 {
+		return errors.New("memory limit exceeded: " + fmt.Sprintf("%d MB", b.config.MaxMemoryMB))
 	}
 
 	select {
-	case b.msgChan <- msg:
+	case b.messages <- msg:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	default:
+		return errors.New("message queue full (size: " + fmt.Sprintf("%d", b.config.MaxQueueSize) + ")")
 	}
 }
 
-// PublishBatch publishes a batch of messages
-func (b *RabbitMQBroker) PublishBatch(ctx context.Context, messages []*model.Message) error {
-	if len(messages) == 0 {
-		return nil
-	}
-
-	select {
-	case b.batchChan <- messages:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// AddValidator adds a message validator
-func (b *RabbitMQBroker) AddValidator(validator broker.MessageValidator) {
-	b.validators = append(b.validators, validator)
-}
-
-// AddTransformer adds a message transformer
-func (b *RabbitMQBroker) AddTransformer(transformer broker.MessageTransformer) {
-	b.transformers = append(b.transformers, transformer)
-}
-
-// Flush forces any buffered messages to be sent
-func (b *RabbitMQBroker) Flush(ctx context.Context) error {
-	return b.ch.Close()
-}
-
-// Health checks the broker's health
-func (b *RabbitMQBroker) Health(ctx context.Context) error {
-	if b.conn == nil || b.conn.IsClosed() {
-		return fmt.Errorf("connection is closed")
-	}
-	if b.ch == nil || b.ch.IsClosed() {
-		return fmt.Errorf("channel is closed")
-	}
-	return nil
-}
-
-// Metrics returns the current metrics
-func (b *RabbitMQBroker) Metrics() broker.BrokerMetrics {
-	return b.metrics
-}
-
-// Close closes the broker connection
+// Close gracefully shuts down the broker
 func (b *RabbitMQBroker) Close() error {
+	if !b.isShutdown.CompareAndSwap(false, true) {
+		return nil // Already closed
+	}
+
 	close(b.done)
-	b.wg.Wait()
 
-	if b.ch != nil {
-		if err := b.ch.Close(); err != nil {
-			log.Error().Err(err).Msg("Failed to close channel")
+	// Wait for workers with timeout
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Info().Msg("All workers gracefully stopped")
+	case <-time.After(b.config.ShutdownTimeout):
+		log.Warn().Msg("Shutdown timeout reached, some workers may still be running")
+	}
+
+	return b.pool.close()
+}
+
+// startWorkers starts the worker pool
+func (b *RabbitMQBroker) startWorkers() {
+	for i := 0; i < b.config.MaxWorkers; i++ {
+		b.wg.Add(1)
+		b.workerCount.Add(1)
+		go b.worker()
+	}
+}
+
+// worker processes messages from the queue
+func (b *RabbitMQBroker) worker() {
+	defer b.wg.Done()
+	defer b.workerCount.Add(-1)
+
+	for {
+		select {
+		case <-b.done:
+			return
+		case msg := <-b.messages:
+			if err := b.publishMessage(msg); err != nil {
+				b.stats.publishErrors.Add(1)
+				b.stats.lastError.Store(err.Error())
+				log.Error().Err(err).Msg("Failed to publish message")
+			} else {
+				b.stats.messagesPublished.Add(1)
+				b.stats.lastPublishTime.Store(time.Now().UnixNano())
+			}
 		}
 	}
-	if b.conn != nil {
-		if err := b.conn.Close(); err != nil {
-			log.Error().Err(err).Msg("Failed to close connection")
-		}
+}
+
+// publishMessage publishes a single message to RabbitMQ
+func (b *RabbitMQBroker) publishMessage(msg *model.Message) error {
+	ch, err := b.pool.getChannel()
+	if err != nil {
+		return errors.New("failed to get channel: " + err.Error())
 	}
 
-	close(b.msgChan)
-	close(b.batchChan)
+	ctx, cancel := context.WithTimeout(context.Background(), b.config.PublishTimeout)
+	defer cancel()
+
+	body, err := msg.MarshalJSON()
+	if err != nil {
+		return errors.New("failed to marshal message: " + err.Error())
+	}
+
+	// Update memory usage
+	msgSize := int64(len(body))
+	if msgSize > int64(b.config.MaxMessageSize) {
+		return errors.New("message size " + fmt.Sprintf("%d", msgSize) + " exceeds limit " + fmt.Sprintf("%d", b.config.MaxMessageSize))
+	}
+	b.memUsage.Add(msgSize)
+	defer b.memUsage.Add(-msgSize)
+
+	err = ch.PublishWithContext(ctx,
+		b.config.Exchange,
+		b.config.RoutingKey,
+		false, // mandatory
+		false, // immediate
+		amqp.Publishing{
+			ContentType:  "application/json",
+			Body:         body,
+			DeliveryMode: b.config.DeliveryMode,
+			Timestamp:    time.Now(),
+		},
+	)
+	if err != nil {
+		return errors.New("failed to publish message: " + err.Error())
+	}
+
 	return nil
+}
+
+// monitorResources periodically monitors system resources
+func (b *RabbitMQBroker) monitorResources() {
+	ticker := time.NewTicker(b.config.MonitorInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-ticker.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			log.Debug().
+				Int64("memory_usage_mb", b.memUsage.Load()/1024/1024).
+				Int32("active_workers", b.workerCount.Load()).
+				Int64("messages_published", b.stats.messagesPublished.Load()).
+				Int64("publish_errors", b.stats.publishErrors.Load()).
+				Int64("reconnect_count", b.stats.reconnectCount.Load()).
+				Int("queue_size", len(b.messages)).
+				Msg("Resource usage stats")
+
+			// Auto-scale workers based on queue size
+			queueSize := len(b.messages)
+			currentWorkers := int(b.workerCount.Load())
+			if queueSize > b.config.MaxQueueSize/2 && currentWorkers < b.config.MaxWorkers {
+				b.wg.Add(1)
+				b.workerCount.Add(1)
+				go b.worker()
+			}
+		}
+	}
+}
+
+// Metrics returns current broker statistics
+func (b *RabbitMQBroker) Metrics() broker.BrokerMetrics {
+	var lastError error
+	if errStr := b.stats.lastError.Load(); errStr != nil {
+		lastError = errors.New(errStr.(string))
+	}
+
+	return broker.BrokerMetrics{
+		MessagesPublished: b.stats.messagesPublished.Load(),
+		MessagesFailed:    b.stats.publishErrors.Load(),
+		BufferSize:        len(b.messages),
+		LastError:         lastError,
+		LastPublishTime:   time.Unix(0, b.stats.lastPublishTime.Load()),
+	}
 }

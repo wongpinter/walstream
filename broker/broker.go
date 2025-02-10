@@ -2,9 +2,15 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"repo.nusatek.id/sugeng/walstreamer/model"
+)
+
+var (
+	// ErrBrokerClosed is returned when the broker is closed
+	ErrBrokerClosed = errors.New("broker is closed")
 )
 
 // MessageValidator is a function type that validates a message before publishing
@@ -70,10 +76,10 @@ type Broker interface {
 
 // BrokerMetrics holds metrics about the broker
 type BrokerMetrics struct {
-	MessagesPublished   int64
-	MessagesFailed      int64
-	BatchesPublished    int64
-	BatchesFailed       int64
+	MessagesPublished  int64
+	MessagesFailed     int64
+	BatchesPublished   int64
+	BatchesFailed      int64
 	AverageLatency     time.Duration
 	BufferSize         int
 	LastPublishTime    time.Time
