@@ -117,7 +117,7 @@ func main() {
 			Str("schema", msg.Schema).
 			Str("table", msg.Table).
 			Uint64("lsn", msg.LSN).
-			Int64("timestamp", msg.Timestamp).
+			Int64("timestamp", msg.Timestamp.Unix()).
 			Interface("before", msg.Before).
 			Interface("after", msg.After).
 			Msg("received WAL message")
@@ -127,7 +127,10 @@ func main() {
 	}
 
 	// Create WAL reader
-	reader := wal.NewReader(walConfig, messageHandler)
+	reader, err := wal.NewReader(walConfig, messageHandler)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create WAL reader")
+	}
 
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
