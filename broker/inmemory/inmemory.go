@@ -14,7 +14,7 @@ import (
 
 // InMemoryBroker implements an enhanced in-memory message broker
 type InMemoryBroker struct {
-	messages     []interface{}
+	messages     []*model.Message
 	mu           sync.RWMutex
 	config       broker.BrokerConfig
 	validators   []broker.MessageValidator
@@ -29,7 +29,7 @@ type InMemoryBroker struct {
 // NewInMemoryBroker creates a new instance of InMemoryBroker
 func NewInMemoryBroker(config broker.BrokerConfig) *InMemoryBroker {
 	b := &InMemoryBroker{
-		messages:     make([]interface{}, 0),
+		messages:     make([]*model.Message, 0),
 		config:       config,
 		validators:   make([]broker.MessageValidator, 0),
 		transformers: make([]broker.MessageTransformer, 0),
@@ -86,7 +86,7 @@ func (b *InMemoryBroker) batchWorker() {
 // processBatch processes a batch of messages
 func (b *InMemoryBroker) processBatch(messages []*model.Message) {
 	start := time.Now()
-	formatted := make([]interface{}, 0, len(messages))
+	formatted := make([]*model.Message, 0, len(messages))
 
 	for _, msg := range messages {
 		if err := b.validateMessage(msg); err != nil {
@@ -235,10 +235,10 @@ func (b *InMemoryBroker) Metrics() broker.BrokerMetrics {
 }
 
 // GetMessages returns all stored messages
-func (b *InMemoryBroker) GetMessages() []interface{} {
+func (b *InMemoryBroker) GetMessages() []*model.Message {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	messages := make([]interface{}, len(b.messages))
+	messages := make([]*model.Message, len(b.messages))
 	copy(messages, b.messages)
 	return messages
 }
@@ -247,7 +247,7 @@ func (b *InMemoryBroker) GetMessages() []interface{} {
 func (b *InMemoryBroker) Clear() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.messages = make([]interface{}, 0)
+	b.messages = make([]*model.Message, 0)
 	b.metrics = broker.BrokerMetrics{}
 }
 

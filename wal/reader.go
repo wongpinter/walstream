@@ -4,6 +4,7 @@ package wal
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ type Reader struct {
 	lsnStorage      lsn.Storage
 	schemaFetcher   *schema.Fetcher
 	decoder         *pgoutput.PgOutputDecoder
+	// Track current transaction
+	currentTx *model.Transaction
 }
 
 // Config holds the configuration for the WAL reader
@@ -225,29 +228,77 @@ func (r *Reader) handleKeepaliveMessage(data []byte) error {
 }
 
 func (r *Reader) handleXLogData(data []byte) error {
-	xld, err := pglogrepl.ParseXLogData(data)
+	walData, err := pglogrepl.ParseXLogData(data)
 	if err != nil {
-		return fmt.Errorf("failed to parse XLogData: %w", err)
+		return fmt.Errorf("failed to parse WAL data: %w", err)
 	}
 
-	r.clientXLogPos = xld.WALStart + pglogrepl.LSN(len(xld.WALData))
+	// Update client position
+	r.clientXLogPos = walData.WALStart + pglogrepl.LSN(len(walData.WALData))
 
-	msg, err := r.decoder.Decode(xld.WALData)
+	// Decode the message
+	msg, err := r.decoder.Decode(walData.WALData)
 	if err != nil {
-		return fmt.Errorf("failed to decode message: %w", err)
+		return fmt.Errorf("failed to decode WAL message: %w", err)
 	}
 
 	if msg == nil {
-		return nil // Skip non-data messages
+		return nil // Skip empty messages
 	}
 
-	// Update LSN in message
-	msg.LSN = uint64(r.clientXLogPos)
+	// Handle transaction boundaries
+	switch msg.Operation {
+	case "BEGIN":
+		txid, err := strconv.ParseUint(msg.TransactionID, 10, 32)
+		if err != nil {
+			return fmt.Errorf("failed to parse transaction ID: %w", err)
+		}
 
-	// Handle the message
-	if err := r.messageHandler(msg); err != nil {
-		return fmt.Errorf("failed to handle message: %w", err)
+		r.currentTx = &model.Transaction{
+			XID:       uint32(txid),
+			LSN:       walData.WALStart,
+			Timestamp: msg.Timestamp,
+			State:     model.TransactionBegin,
+			Changes:   make([]*model.Message, 0),
+		}
+		// Send transaction begin marker
+		if err := r.messageHandler(msg); err != nil {
+			return fmt.Errorf("failed to handle BEGIN message: %w", err)
+		}
+		return nil
+
+	case "COMMIT":
+		if r.currentTx == nil {
+			r.logger.Warn().Msg("received COMMIT without BEGIN")
+			return nil
+		}
+		r.currentTx.State = model.TransactionCommit
+		// Send all changes in order
+		for _, change := range r.currentTx.Changes {
+			if err := r.messageHandler(change); err != nil {
+				return fmt.Errorf("failed to handle change message: %w", err)
+			}
+		}
+		// Send transaction commit marker
+		if err := r.messageHandler(msg); err != nil {
+			return fmt.Errorf("failed to handle COMMIT message: %w", err)
+		}
+		r.currentTx = nil
+		return nil
+
+	case "RELATION":
+		// Skip relation messages, they are handled by the decoder
+		return nil
 	}
+
+	// Handle data changes (INSERT/UPDATE/DELETE)
+	if r.currentTx == nil {
+		r.logger.Warn().Msg("received change without transaction")
+		return nil
+	}
+
+	// Add to current transaction
+	r.currentTx.Changes = append(r.currentTx.Changes, msg)
 
 	return nil
 }

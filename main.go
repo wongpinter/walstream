@@ -15,6 +15,7 @@ import (
 
 	"repo.nusatek.id/sugeng/walstreamer/broker"
 	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
+	"repo.nusatek.id/sugeng/walstreamer/broker/nats"
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
 	"repo.nusatek.id/sugeng/walstreamer/model"
@@ -52,7 +53,8 @@ func main() {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 	}
 
-	// Initialize in-memory broker with configuration
+	// Initialize broker based on configuration
+	var messageBroker broker.Broker
 	brokerConfig := broker.BrokerConfig{
 		BufferSize: 1000, // Configurable buffer size
 		BatchConfig: broker.BatchConfig{
@@ -63,7 +65,25 @@ func main() {
 		ShutdownTimeout:  30 * time.Second,
 		HeartbeatTimeout: 5 * time.Second,
 	}
-	broker := inmemory.NewInMemoryBroker(brokerConfig)
+
+	switch cfg.Broker.Type {
+	case "nats":
+		natsConfig := nats.Config{
+			URL:      cfg.Broker.Hosts[0], // Use first host for now
+			Subject:  cfg.Broker.Topic,
+			Logger:   log.Logger,
+			Username: cfg.Broker.Username,
+			Password: cfg.Broker.Password,
+		}
+		natsBroker, err := nats.NewBroker(natsConfig)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to create NATS broker")
+		}
+		messageBroker = natsBroker
+	default:
+		messageBroker = inmemory.NewInMemoryBroker(brokerConfig)
+		log.Info().Str("type", cfg.Broker.Type).Msg("Using in-memory broker")
+	}
 
 	// Create LSN storage
 	storage, err := lsn.NewFileStorage(cfg.LSN.Path, time.Duration(cfg.LSN.PersistInterval)*time.Second)
@@ -109,7 +129,7 @@ func main() {
 
 		if !lsnExists {
 			log.Info().Msg("LSN file not found, starting initial sync")
-			syncer := sync.NewInitialSyncer(cfg, broker, log.Logger)
+			syncer := sync.NewInitialSyncer(cfg, messageBroker, log.Logger)
 			if err := syncer.Start(context.Background()); err != nil {
 				log.Fatal().Err(err).Msg("failed to perform initial sync")
 			}
@@ -136,9 +156,19 @@ func main() {
 		// Check if table is in filter list
 		tableFullName := fmt.Sprintf("%s.%s", msg.Schema, msg.Table)
 
+		log.Debug().
+			Str("table", tableFullName).
+			Strs("configured_tables", cfg.Replication.Tables).
+			Int("table_configs_count", len(cfg.Replication.TableConfigs)).
+			Msg("checking table filters")
+
 		// First check exclusions
 		for _, pattern := range cfg.Replication.Tables {
 			if strings.HasPrefix(pattern, "!") && tableFullName == strings.TrimPrefix(pattern, "!") {
+				log.Debug().
+					Str("table", tableFullName).
+					Str("pattern", pattern).
+					Msg("table excluded by pattern")
 				return nil // Skip excluded table
 			}
 		}
@@ -148,6 +178,10 @@ func main() {
 		for _, tc := range cfg.Replication.TableConfigs {
 			if tc.Name == tableFullName {
 				allowedOps = tc.Operations
+				log.Debug().
+					Str("table", tableFullName).
+					Strs("operations", tc.Operations).
+					Msg("found specific table config")
 				break
 			}
 		}
@@ -162,9 +196,17 @@ func main() {
 				}
 			}
 			if !tableIncluded {
+				log.Debug().
+					Str("table", tableFullName).
+					Strs("included_tables", cfg.Replication.Tables).
+					Msg("table not in include list")
 				return nil // Skip table not in include list
 			}
 			allowedOps = cfg.Replication.DefaultOps
+			log.Debug().
+				Str("table", tableFullName).
+				Strs("default_ops", cfg.Replication.DefaultOps).
+				Msg("using default operations")
 		}
 
 		// Check if operation is allowed
@@ -196,12 +238,12 @@ func main() {
 			Msg("received WAL message")
 
 		// Publish message to broker
-		if err := broker.Publish(context.Background(), msg); err != nil {
+		if err := messageBroker.Publish(context.Background(), msg); err != nil {
 			return fmt.Errorf("failed to publish message: %w", err)
 		}
 
 		// Print broker metrics for debugging
-		metrics := broker.Metrics()
+		metrics := messageBroker.Metrics()
 		log.Info().
 			Int64("messages_published", metrics.MessagesPublished).
 			Int64("messages_failed", metrics.MessagesFailed).
@@ -231,11 +273,6 @@ func main() {
 	}()
 
 	// Start WAL reader
-	log.Info().
-		Str("slot", cfg.Replication.SlotName).
-		Str("publication", cfg.Replication.PublicationName).
-		Msg("Starting WAL reader")
-
 	if err := reader.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("WAL reader failed")
 	}

@@ -22,7 +22,7 @@ replication:
 broker:
   type: nats
   hosts:
-    - nats://localhost:4222
+    - nats://Cosmic-Echo.local:4222
   topic: walstreamer.changes
   username: ""
   password: ""
@@ -33,7 +33,7 @@ lsn:
   persist_interval: 5s
 
 log:
-  level: info
+  level: debug
   format: console
 
 storage:
