@@ -1,0 +1,94 @@
+# Future Improvements Tracking
+
+## Metrics and Monitoring
+- [ ] Prometheus metrics integration
+  - [ ] Number of changes processed
+  - [ ] Processing latency
+  - [ ] Error counts
+  - [ ] LSN lag behind master
+  - [ ] Message broker queue size
+- [ ] Health check endpoints
+- [ ] OpenTelemetry tracing integration
+
+## Enhanced Filtering
+- [ ] Column-level filtering
+- [ ] Regex-based table filtering
+- [ ] Data-based filtering (WHERE clause conditions)
+- [ ] Column exclusion support
+- [ ] Transformation pipeline
+
+## Schema Evolution
+- [ ] ALTER TABLE operation handling
+- [ ] Table creation/deletion events
+- [ ] Schema version control
+- [ ] Schema change notifications
+- [ ] Schema history tracking
+
+## Performance Optimizations
+- [ ] Batch processing implementation
+- [ ] Configurable batching parameters
+- [ ] Memory pooling
+- [ ] JSON serialization optimization
+- [ ] Message compression options
+
+## Resilience Improvements
+- [ ] Circuit breaker pattern
+- [ ] Enhanced retry strategies
+- [ ] Message buffering
+- [ ] Dead letter queue
+- [ ] Improved timeout handling
+
+## Additional Broker Support
+- [ ] Apache Kafka integration
+- [ ] RabbitMQ integration
+- [ ] Redis Streams support
+- [ ] AWS SQS/SNS support
+- [ ] Multi-broker support
+
+## Security Enhancements
+- [ ] TLS support
+- [ ] Credential rotation
+- [ ] LSN storage encryption
+- [ ] Data masking
+- [ ] Audit logging
+
+## Testing Improvements
+- [ ] Integration tests
+- [ ] Performance benchmarks
+- [ ] Chaos testing
+- [ ] Test coverage improvement
+- [ ] Documentation examples
+
+## Configuration and Management
+- [ ] Dynamic configuration
+- [ ] Management API
+- [ ] Enhanced validation
+- [ ] Environment variable support
+- [ ] Hot reload capability
+
+## Data Consistency
+- [ ] Transaction boundary markers
+- [ ] Consistent snapshot support
+- [ ] Multi-table transaction grouping
+- [ ] Change ordering guarantees
+
+## Developer Experience
+- [ ] Enhanced documentation
+- [ ] Management CLI
+- [ ] Development environment
+- [ ] Framework integration examples
+- [ ] Debug tooling
+
+## Resource Management
+- [ ] Connection pooling
+- [ ] Memory limits
+- [ ] Goroutine management
+- [ ] Resource cleanup
+- [ ] System monitoring
+
+# Implementation Status
+- [x] Basic WAL reading
+- [x] Basic message processing
+- [x] In-memory broker
+- [x] Basic error handling
+- [x] Basic logging

@@ -35,7 +35,7 @@ type DatabaseConfig struct {
 type ReplicationConfig struct {
 	SlotName        string   `koanf:"slot_name"`
 	PublicationName string   `koanf:"publication_name"`
-	Tables          []string `koanf:"tables"`  // Format: "schema.table", prefix with "!" to exclude
+	Tables          []string `koanf:"tables"` // Format: "schema.table", prefix with "!" to exclude
 	StandbyTimeout  Duration `koanf:"standby_timeout"`
 }
 

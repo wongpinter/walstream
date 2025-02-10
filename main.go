@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"repo.nusatek.id/sugeng/walstreamer/broker"
 	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
@@ -51,7 +52,7 @@ func main() {
 	}
 
 	// Initialize in-memory broker
-	broker := inmemory.NewInMemoryBroker(model.CompactFormat)
+	broker := inmemory.NewInMemoryBroker(broker.BrokerConfig{})
 
 	// Create LSN storage
 	storage, err := lsn.NewFileStorage(cfg.LSN.Path, time.Duration(cfg.LSN.PersistInterval)*time.Second)
