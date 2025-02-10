@@ -17,31 +17,31 @@ type DataType struct {
 
 // ColumnDefinition represents a column in a table
 type ColumnDefinition struct {
-	Name       string   `json:"name"`
-	Type       DataType `json:"type"`
-	Order      int      `json:"order"`      // Column position in table
-	Optional   bool     `json:"optional"`    // Whether column is nullable
-	IsKey      bool     `json:"is_key"`     // Whether column is part of primary key
-	IsGenerated bool    `json:"is_generated"` // Whether column is generated
-	Default    *string  `json:"default,omitempty"` // Default value expression
+	Name        string   `json:"name"`
+	Type        DataType `json:"type"`
+	Order       int      `json:"order"`             // Column position in table
+	Optional    bool     `json:"optional"`          // Whether column is nullable
+	IsKey       bool     `json:"is_key"`            // Whether column is part of primary key
+	IsGenerated bool     `json:"is_generated"`      // Whether column is generated
+	Default     *string  `json:"default,omitempty"` // Default value expression
 }
 
 // TableSchema represents the schema of a table
 type TableSchema struct {
 	Columns     []ColumnDefinition `json:"columns"`
-	PrimaryKey  []string          `json:"primary_key"`  // Names of primary key columns
-	UniqueKeys  [][]string        `json:"unique_keys"`  // Sets of unique key columns
-	ForeignKeys []ForeignKey      `json:"foreign_keys"` // Foreign key constraints
+	PrimaryKey  []string           `json:"primary_key"`  // Names of primary key columns
+	UniqueKeys  [][]string         `json:"unique_keys"`  // Sets of unique key columns
+	ForeignKeys []ForeignKey       `json:"foreign_keys"` // Foreign key constraints
 }
 
 // ForeignKey represents a foreign key constraint
 type ForeignKey struct {
-	Columns          []string `json:"columns"`           // Local columns
-	ReferencedSchema string   `json:"referenced_schema"` // Referenced schema name
-	ReferencedTable  string   `json:"referenced_table"`  // Referenced table name
+	Columns           []string `json:"columns"`            // Local columns
+	ReferencedSchema  string   `json:"referenced_schema"`  // Referenced schema name
+	ReferencedTable   string   `json:"referenced_table"`   // Referenced table name
 	ReferencedColumns []string `json:"referenced_columns"` // Referenced columns
-	OnDelete         string   `json:"on_delete"`         // ON DELETE action
-	OnUpdate         string   `json:"on_update"`         // ON UPDATE action
+	OnDelete          string   `json:"on_delete"`          // ON DELETE action
+	OnUpdate          string   `json:"on_update"`          // ON UPDATE action
 }
 
 // MessageFormat defines the type of message format to be used
@@ -62,7 +62,7 @@ type Message struct {
 	ID            string    `json:"id"`             // Unique event ID
 	TransactionID string    `json:"transaction_id"` // PostgreSQL transaction ID
 	Operation     string    `json:"operation"`      // INSERT, UPDATE, DELETE, CREATE, ALTER, TRUNCATE
-	LSN           uint64    `json:"lsn"`           // Log Sequence Number
+	LSN           uint64    `json:"lsn"`            // Log Sequence Number
 	Timestamp     time.Time `json:"timestamp"`      // Timestamp of the change
 
 	// Table information
@@ -76,8 +76,8 @@ type Message struct {
 
 	// Additional metadata
 	EventType    string                 `json:"event_type"`              // DML or DDL
-	Tags         map[string]string      `json:"tags,omitempty"`         // Custom tags
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`     // Additional metadata
+	Tags         map[string]string      `json:"tags,omitempty"`          // Custom tags
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`      // Additional metadata
 	DebugContext map[string]interface{} `json:"debug_context,omitempty"` // Debug information
 }
 
