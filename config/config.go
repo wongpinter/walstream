@@ -31,22 +31,30 @@ type DatabaseConfig struct {
 	SSLMode  string `koanf:"sslmode"`
 }
 
-// TableConfig defines configuration for a specific table
+// TableConfig holds configuration for a specific table
 type TableConfig struct {
-	Name       string   `yaml:"name"`       // Full table name (schema.table)
-	Operations []string `yaml:"operations"` // List of operations to listen for (INSERT, UPDATE, DELETE)
+	Name       string   `koanf:"name"`       // Table name in format schema.table
+	Operations []string `koanf:"operations"` // List of operations to capture
 }
 
-// ReplicationConfig holds replication-related configuration
+// ReplicationConfig holds configuration for WAL replication
 type ReplicationConfig struct {
-	PublicationName string        `koanf:"publication_name"`
-	SlotName        string        `koanf:"slot_name"`
-	StandbyTimeout  int           `koanf:"standby_timeout"`
-	Tables          []string      `koanf:"tables"`        // For backward compatibility
-	TableConfigs    []TableConfig `koanf:"table_configs"` // New table-specific configurations
-	DefaultOps      []string      `koanf:"default_ops"`   // Default operations for tables without specific config
-	InitialSync     bool          `koanf:"initial_sync"`  // Whether to sync existing data on first run
-	BatchSize       int           `koanf:"batch_size"`    // Batch size for initial sync, default 1000
+	PublicationName string            `koanf:"publication_name"` // Name of the PostgreSQL publication
+	SlotName        string            `koanf:"slot_name"`        // Name of the replication slot
+	StandbyTimeout  int               `koanf:"standby_timeout"`  // Standby timeout in seconds
+	Tables          []string          `koanf:"tables"`           // List of tables to replicate
+	TableConfigs    []TableConfig     `koanf:"table_configs"`    // Table-specific configurations
+	DefaultOps      []string          `koanf:"default_ops"`      // Default operations for tables without specific config
+	InitialSync     bool              `koanf:"initial_sync"`     // Whether to sync existing data on first run
+	BatchSize       int               `koanf:"batch_size"`       // Batch size for initial sync, default 1000
+	Reconnect       ReconnectConfig   `koanf:"reconnect"`        // Reconnection settings
+}
+
+// ReconnectConfig holds configuration for reconnection settings
+type ReconnectConfig struct {
+	MaxAttempts   int `koanf:"max_attempts"`   // Maximum number of reconnection attempts (0 = unlimited)
+	InitialDelay  int `koanf:"initial_delay"`  // Initial delay between attempts in seconds
+	MaxDelay      int `koanf:"max_delay"`      // Maximum delay between attempts in seconds
 }
 
 func (c *ReplicationConfig) Validate() error {

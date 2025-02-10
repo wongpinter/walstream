@@ -190,18 +190,6 @@ func (b *InMemoryBroker) transformMessage(msg *model.Message) (*model.Message, e
 	return current, nil
 }
 
-// updateMetrics updates broker metrics
-func (b *InMemoryBroker) updateMetrics(count int, duration time.Duration) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.metrics.MessagesPublished += int64(count)
-	b.metrics.AverageLatency = duration
-	b.metrics.LastPublishTime = time.Now()
-	b.metrics.LastSuccessfulTime = time.Now()
-	b.metrics.BufferSize = len(b.messages) + len(b.msgChan)
-}
-
 // AddValidator adds a message validator
 func (b *InMemoryBroker) AddValidator(validator broker.MessageValidator) {
 	b.validators = append(b.validators, validator)
