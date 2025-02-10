@@ -91,52 +91,79 @@ func (b *InMemoryBroker) processBatch(messages []*model.Message) {
 	for _, msg := range messages {
 		if err := b.validateMessage(msg); err != nil {
 			log.Error().Err(err).Msg("Message validation failed")
+			b.mu.Lock()
 			b.metrics.MessagesFailed++
+			b.metrics.LastError = err
+			b.metrics.LastErrorTime = time.Now()
+			b.mu.Unlock()
 			continue
 		}
 
 		transformed, err := b.transformMessage(msg)
 		if err != nil {
 			log.Error().Err(err).Msg("Message transformation failed")
+			b.mu.Lock()
 			b.metrics.MessagesFailed++
+			b.metrics.LastError = err
+			b.metrics.LastErrorTime = time.Now()
+			b.mu.Unlock()
 			continue
 		}
 
-		formatted = append(formatted, transformed.ToFormat(b.config.Format))
+		formatted = append(formatted, transformed)
 	}
 
 	b.mu.Lock()
 	b.messages = append(b.messages, formatted...)
+	b.metrics.MessagesPublished += int64(len(formatted))
+	b.metrics.AverageLatency = time.Since(start)
+	b.metrics.LastSuccessfulTime = time.Now()
+	b.metrics.LastPublishTime = time.Now()
+	b.metrics.BufferSize = len(b.messages) + len(b.msgChan)
 	b.mu.Unlock()
-
-	b.updateMetrics(len(messages), time.Since(start))
 }
 
 // Publish adds a message to the broker
 func (b *InMemoryBroker) Publish(ctx context.Context, msg *model.Message) error {
-	if msg == nil {
-		return fmt.Errorf("cannot publish nil message")
-	}
-
 	select {
-	case b.msgChan <- msg:
-		return nil
 	case <-ctx.Done():
+		b.mu.Lock()
+		b.metrics.MessagesFailed++
+		b.metrics.LastError = ctx.Err()
+		b.metrics.LastErrorTime = time.Now()
+		b.mu.Unlock()
 		return ctx.Err()
+	case b.msgChan <- msg:
+		b.mu.Lock()
+		b.metrics.LastSuccessfulTime = time.Now()
+		b.metrics.LastPublishTime = time.Now()
+		b.mu.Unlock()
+		return nil
+	default:
+		b.mu.Lock()
+		b.metrics.MessagesFailed++
+		b.metrics.LastError = fmt.Errorf("message queue full (size: %d)", cap(b.msgChan))
+		b.metrics.LastErrorTime = time.Now()
+		b.mu.Unlock()
+		return fmt.Errorf("message queue full (size: %d)", cap(b.msgChan))
 	}
 }
 
 // PublishBatch publishes a batch of messages
 func (b *InMemoryBroker) PublishBatch(ctx context.Context, messages []*model.Message) error {
-	if len(messages) == 0 {
-		return nil
-	}
-
 	select {
-	case b.batchChan <- messages:
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case b.batchChan <- messages:
+		b.mu.Lock()
+		b.metrics.BatchesPublished++
+		b.mu.Unlock()
+		return nil
+	default:
+		b.mu.Lock()
+		b.metrics.BatchesFailed++
+		b.mu.Unlock()
+		return fmt.Errorf("batch queue full (size: %d)", cap(b.batchChan))
 	}
 }
 
@@ -153,24 +180,26 @@ func (b *InMemoryBroker) validateMessage(msg *model.Message) error {
 // transformMessage applies all transformers to a message
 func (b *InMemoryBroker) transformMessage(msg *model.Message) (*model.Message, error) {
 	current := msg
+	var err error
 	for _, transformer := range b.transformers {
-		transformed, err := transformer(current)
+		current, err = transformer(current)
 		if err != nil {
 			return nil, err
 		}
-		current = transformed
 	}
 	return current, nil
 }
 
 // updateMetrics updates broker metrics
 func (b *InMemoryBroker) updateMetrics(count int, duration time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	b.metrics.MessagesPublished += int64(count)
-	b.metrics.BatchesPublished++
-	b.metrics.AverageLatency = (b.metrics.AverageLatency + duration) / 2
+	b.metrics.AverageLatency = duration
 	b.metrics.LastPublishTime = time.Now()
 	b.metrics.LastSuccessfulTime = time.Now()
-	b.metrics.BufferSize = len(b.msgChan)
+	b.metrics.BufferSize = len(b.messages) + len(b.msgChan)
 }
 
 // AddValidator adds a message validator
@@ -185,36 +214,39 @@ func (b *InMemoryBroker) AddTransformer(transformer broker.MessageTransformer) {
 
 // Flush forces any buffered messages to be sent
 func (b *InMemoryBroker) Flush(ctx context.Context) error {
-	// Implementation for in-memory broker is a no-op
+	// In-memory broker doesn't need explicit flushing
 	return nil
 }
 
 // Health returns the current health status
 func (b *InMemoryBroker) Health(ctx context.Context) error {
-	// For in-memory broker, always healthy
+	// In-memory broker is always healthy
 	return nil
 }
 
 // Metrics returns the current metrics
 func (b *InMemoryBroker) Metrics() broker.BrokerMetrics {
-	return b.metrics
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	metrics := b.metrics
+	metrics.BufferSize = len(b.messages) + len(b.msgChan)
+	return metrics
 }
 
 // GetMessages returns all stored messages
 func (b *InMemoryBroker) GetMessages() []interface{} {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-
-	result := make([]interface{}, len(b.messages))
-	copy(result, b.messages)
-	return result
+	messages := make([]interface{}, len(b.messages))
+	copy(messages, b.messages)
+	return messages
 }
 
 // Clear removes all stored messages
 func (b *InMemoryBroker) Clear() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	b.messages = make([]interface{}, 0)
 	b.metrics = broker.BrokerMetrics{}
 }
@@ -223,7 +255,5 @@ func (b *InMemoryBroker) Clear() {
 func (b *InMemoryBroker) Close() error {
 	close(b.done)
 	b.wg.Wait()
-	close(b.msgChan)
-	close(b.batchChan)
 	return nil
 }
