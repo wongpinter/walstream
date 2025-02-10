@@ -1,67 +1,136 @@
 package lsn
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestFileStorage(t *testing.T) {
-	// Create temporary directory for test
-	tmpDir, err := os.MkdirTemp("", "lsn_test")
+	// Create temp directory for tests
+	tmpDir, err := os.MkdirTemp("", "lsn_test_*")
 	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	filePath := filepath.Join(tmpDir, "lsn.json")
+	tests := []struct {
+		name        string
+		publication string
+		lsn         uint64
+		wantErr     bool
+	}{
+		{
+			name:        "basic set and get",
+			publication: "test_pub",
+			lsn:         12345,
+			wantErr:     false,
+		},
+		{
+			name:        "zero LSN",
+			publication: "test_pub_zero",
+			lsn:         0,
+			wantErr:     false,
+		},
+		{
+			name:        "large LSN",
+			publication: "test_pub_large",
+			lsn:         18446744073709551615, // max uint64
+			wantErr:     false,
+		},
+	}
 
-	// Test creating new storage
-	storage, err := NewFileStorage(filePath)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create storage with short persist interval for testing
+			storage, err := NewFileStorage(tmpDir, 100*time.Millisecond)
+			if err != nil {
+				t.Fatalf("NewFileStorage() error = %v", err)
+			}
+			defer storage.Close()
+
+			// Set LSN
+			if err := storage.Set(tt.publication, tt.lsn); err != nil {
+				if !tt.wantErr {
+					t.Errorf("Set() error = %v", err)
+				}
+				return
+			}
+
+			// Wait for persistence
+			time.Sleep(200 * time.Millisecond)
+
+			// Verify file exists
+			if _, err := os.Stat(filepath.Join(tmpDir, tt.publication+".lsn")); err != nil {
+				t.Errorf("LSN file not created: %v", err)
+			}
+
+			// Get LSN
+			got, err := storage.Get(tt.publication)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Get() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.lsn {
+				t.Errorf("Get() = %v, want %v", got, tt.lsn)
+			}
+
+			// Create new storage instance to test persistence
+			storage2, err := NewFileStorage(tmpDir, 100*time.Millisecond)
+			if err != nil {
+				t.Fatalf("NewFileStorage() error = %v", err)
+			}
+			defer storage2.Close()
+
+			// Get LSN from new instance
+			got, err = storage2.Get(tt.publication)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Get() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.lsn {
+				t.Errorf("Get() = %v, want %v", got, tt.lsn)
+			}
+		})
+	}
+}
+
+func TestFileStorage_Concurrent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lsn_test_concurrent_*")
 	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
+		t.Fatalf("failed to create temp dir: %v", err)
 	}
+	defer os.RemoveAll(tmpDir)
 
-	// Test initial state
-	lsn, err := storage.Get("test_pub")
+	storage, err := NewFileStorage(tmpDir, 100*time.Millisecond)
 	if err != nil {
-		t.Fatalf("Failed to get initial LSN: %v", err)
+		t.Fatalf("NewFileStorage() error = %v", err)
 	}
-	if lsn != 0 {
-		t.Errorf("Expected initial LSN to be 0, got %d", lsn)
+	defer storage.Close()
+
+	const numGoroutines = 10
+	const numOperations = 100
+
+	done := make(chan bool)
+	for i := 0; i < numGoroutines; i++ {
+		go func(n int) {
+			pub := fmt.Sprintf("pub_%d", n)
+			for j := 0; j < numOperations; j++ {
+				if err := storage.Set(pub, uint64(j)); err != nil {
+					t.Errorf("Set() error = %v", err)
+				}
+				if _, err := storage.Get(pub); err != nil {
+					t.Errorf("Get() error = %v", err)
+				}
+			}
+			done <- true
+		}(i)
 	}
 
-	// Test setting LSN
-	testLSN := uint64(12345)
-	if err := storage.Set("test_pub", testLSN); err != nil {
-		t.Fatalf("Failed to set LSN: %v", err)
-	}
-
-	// Test getting LSN
-	lsn, err = storage.Get("test_pub")
-	if err != nil {
-		t.Fatalf("Failed to get LSN: %v", err)
-	}
-	if lsn != testLSN {
-		t.Errorf("Expected LSN %d, got %d", testLSN, lsn)
-	}
-
-	// Test persistence
-	if err := storage.Close(); err != nil {
-		t.Fatalf("Failed to close storage: %v", err)
-	}
-
-	// Create new storage instance and verify state is loaded
-	storage2, err := NewFileStorage(filePath)
-	if err != nil {
-		t.Fatalf("Failed to create second storage: %v", err)
-	}
-
-	lsn, err = storage2.Get("test_pub")
-	if err != nil {
-		t.Fatalf("Failed to get LSN from second storage: %v", err)
-	}
-	if lsn != testLSN {
-		t.Errorf("Expected LSN %d from second storage, got %d", testLSN, lsn)
+	// Wait for all goroutines to finish
+	for i := 0; i < numGoroutines; i++ {
+		<-done
 	}
 }
