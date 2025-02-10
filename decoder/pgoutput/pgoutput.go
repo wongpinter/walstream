@@ -3,9 +3,7 @@ package pgoutput
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -32,6 +30,7 @@ const (
 	OIDVarchar     = 1043
 	OIDBpchar      = 1042
 	OIDByteArray   = 17
+	OIDNumeric     = 1700
 )
 
 type relationInfo struct {
@@ -409,107 +408,146 @@ func (d *PgOutputDecoder) getTupleDataLength(data []byte) int {
 	return pos
 }
 
-func (d *PgOutputDecoder) parseValue(data []byte, oid uint32) (interface{}, error) {
+func (d *PgOutputDecoder) parseValue(data []byte, typeOid uint32) (interface{}, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
 
-	// Try parsing as text first for short values
-	if len(data) < 4 {
-		strVal := string(data)
-		switch oid {
-		case OIDInt2, OIDInt4, OIDInt8:
-			var i int64
-			_, err := fmt.Sscanf(strVal, "%d", &i)
-			if err == nil {
-				return i, nil
-			}
-		case OIDFloat4, OIDFloat8:
-			var f float64
-			_, err := fmt.Sscanf(strVal, "%f", &f)
-			if err == nil {
-				return f, nil
-			}
-		case OIDBoolean:
-			switch strings.ToLower(strVal) {
-			case "t", "true", "1":
-				return true, nil
-			case "f", "false", "0":
-				return false, nil
-			}
-		}
-	}
+	// Try parsing as text first
+	strVal := string(data)
 
-	// If text parsing fails or data is long enough, try binary format
-	switch oid {
-	case OIDText, OIDVarchar, OIDBpchar:
-		return string(data), nil
-
-	case OIDInt2:
-		if len(data) < 2 {
-			return nil, fmt.Errorf("insufficient data for int2: got %d bytes, need 2", len(data))
+	switch typeOid {
+	case OIDBoolean:
+		if len(data) == 1 {
+			return data[0] == 't', nil
 		}
-		return int16(binary.BigEndian.Uint16(data)), nil
+		switch strings.ToLower(strVal) {
+		case "t", "true", "1":
+			return true, nil
+		case "f", "false", "0":
+			return false, nil
+		default:
+			return nil, fmt.Errorf("invalid boolean value: %s", strVal)
+		}
 
 	case OIDInt4:
-		if len(data) < 4 {
-			return nil, fmt.Errorf("insufficient data for int4: got %d bytes, need 4", len(data))
+		// Try text format first
+		var i int32
+		if _, err := fmt.Sscanf(strVal, "%d", &i); err == nil {
+			return i, nil
 		}
-		return int32(binary.BigEndian.Uint32(data)), nil
+		// Try binary format
+		if len(data) == 4 {
+			return int32(binary.BigEndian.Uint32(data)), nil
+		}
+		return nil, fmt.Errorf("invalid int4 value: %s", strVal)
 
-	case OIDInt8:
+	case OIDVarchar:
+		return strVal, nil
+
+	case OIDTimestamp:
+		// Try text format first - PostgreSQL timestamp formats
+		formats := []string{
+			"2006-01-02 15:04:05.999999999", // With microseconds
+			"2006-01-02 15:04:05.999999",    // With microseconds (6 digits)
+			"2006-01-02 15:04:05.999",       // With milliseconds
+			"2006-01-02 15:04:05",           // Without fraction
+			time.RFC3339,                    // ISO format
+			time.RFC3339Nano,                // ISO format with nanoseconds
+		}
+
+		for _, format := range formats {
+			if t, err := time.Parse(format, strVal); err == nil {
+				return t, nil
+			}
+		}
+
+		// Try binary format
+		if len(data) == 8 {
+			microsecSinceY2K := int64(binary.BigEndian.Uint64(data))
+			return time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).
+				Add(time.Duration(microsecSinceY2K) * time.Microsecond), nil
+		}
+
+		return nil, fmt.Errorf("invalid timestamp format: %s (supported formats: YYYY-MM-DD HH:MM:SS[.NNNNNN], RFC3339)", strVal)
+
+	case OIDNumeric:
+		// Try text format first
+		if _, err := fmt.Sscanf(strVal, "%f", new(float64)); err == nil {
+			return strVal, nil
+		}
+		// Try binary format
 		if len(data) < 8 {
-			return nil, fmt.Errorf("insufficient data for int8: got %d bytes, need 8", len(data))
+			return nil, fmt.Errorf("invalid numeric length: %d", len(data))
 		}
-		return int64(binary.BigEndian.Uint64(data)), nil
 
-	case OIDFloat4:
-		if len(data) < 4 {
-			return nil, fmt.Errorf("insufficient data for float4: got %d bytes, need 4", len(data))
+		numDigits := binary.BigEndian.Uint16(data[0:2])
+		weight := int16(binary.BigEndian.Uint16(data[2:4]))
+		sign := binary.BigEndian.Uint16(data[4:6])
+		dscale := binary.BigEndian.Uint16(data[6:8])
+		digits := make([]int16, numDigits)
+
+		for i := 0; i < int(numDigits); i++ {
+			start := 8 + (i * 2)
+			if start+2 > len(data) {
+				return nil, fmt.Errorf("invalid numeric data length for digits")
+			}
+			digits[i] = int16(binary.BigEndian.Uint16(data[start : start+2]))
 		}
-		bits := binary.BigEndian.Uint32(data)
-		return math.Float32frombits(bits), nil
 
-	case OIDFloat8:
-		if len(data) < 8 {
-			return nil, fmt.Errorf("insufficient data for float8: got %d bytes, need 8", len(data))
+		// Convert to string representation
+		var result strings.Builder
+		if sign == 0x4000 {
+			result.WriteString("-")
 		}
-		bits := binary.BigEndian.Uint64(data)
-		return math.Float64frombits(bits), nil
 
-	case OIDBoolean:
-		if len(data) < 1 {
-			return nil, fmt.Errorf("insufficient data for bool: got %d bytes, need 1", len(data))
+		if numDigits == 0 {
+			return "0", nil
 		}
-		return data[0] != 0, nil
 
-	case OIDDate:
-		if len(data) < 4 {
-			return nil, fmt.Errorf("insufficient data for date: got %d bytes, need 4", len(data))
+		// Calculate the position of decimal point
+		decimalPoint := int((weight + 1) * 4)
+
+		// Build the number string
+		digitsAdded := 0
+		for i, d := range digits {
+			currentPos := i * 4
+			if currentPos == decimalPoint {
+				result.WriteString(".")
+			}
+			result.WriteString(fmt.Sprintf("%04d", d))
+			digitsAdded += 4
 		}
-		days := int32(binary.BigEndian.Uint32(data))
-		return time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(days)), nil
 
-	case OIDTimestamp, OIDTimestamptz:
-		if len(data) < 8 {
-			return nil, fmt.Errorf("insufficient data for timestamp: got %d bytes, need 8", len(data))
+		// Add trailing zeros if needed
+		for digitsAdded < decimalPoint {
+			result.WriteString("0000")
+			digitsAdded += 4
 		}
-		microsecs := binary.BigEndian.Uint64(data)
-		return time.Unix(0, int64(microsecs)*1000).Format(time.RFC3339Nano), nil
 
-	case OIDJson, OIDJsonb:
-		var val interface{}
-		if err := json.Unmarshal(data, &val); err != nil {
-			return nil, fmt.Errorf("failed to decode JSON: %w", err)
+		// Add decimal point and trailing zeros if dscale > 0
+		if dscale > 0 && digitsAdded <= decimalPoint {
+			result.WriteString(".")
 		}
-		return val, nil
 
-	case OIDByteArray:
-		return data, nil
+		// Trim leading zeros (except the last one before decimal)
+		numStr := result.String()
+		numStr = strings.TrimLeft(numStr, "0")
+		if numStr == "" || numStr[0] == '.' {
+			numStr = "0" + numStr
+		}
+
+		// Trim trailing zeros after decimal
+		if strings.Contains(numStr, ".") {
+			numStr = strings.TrimRight(numStr, "0")
+			numStr = strings.TrimRight(numStr, ".")
+		}
+
+		return numStr, nil
 
 	default:
-		// For unknown or array types, return as string
-		return string(data), nil
+		// For unknown types, return as string
+		return strVal, nil
 	}
 }
 
@@ -545,6 +583,8 @@ func (d *PgOutputDecoder) getTypeName(oid uint32) string {
 		return "bpchar"
 	case OIDByteArray:
 		return "bytea"
+	case OIDNumeric:
+		return "numeric"
 	default:
 		return fmt.Sprintf("unknown_%d", oid)
 	}
