@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/rs/zerolog"
 
-	"repo.nusatek.id/sugeng/walstreamer/model"
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
+	"repo.nusatek.id/sugeng/walstreamer/model"
 )
 
 // Reader is responsible for reading and processing WAL entries
@@ -75,6 +75,13 @@ func (r *Reader) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to identify system: %w", err)
 	}
 
+	r.logger.Debug().
+		Str("system_id", sysident.SystemID).
+		Str("timeline", fmt.Sprintf("%d", sysident.Timeline)).
+		Str("xlogpos", sysident.XLogPos.String()).
+		Str("dbname", sysident.DBName).
+		Msg("identified system")
+
 	// Get last processed LSN from storage
 	lastLSN, err := r.lsnStorage.Get(r.publicationName)
 	if err != nil {
@@ -92,14 +99,24 @@ func (r *Reader) Start(ctx context.Context) error {
 	}
 
 	// Start replication
-	err = pglogrepl.StartReplication(ctx, r.conn, r.slotName, r.clientXLogPos, pglogrepl.StartReplicationOptions{
-		PluginArgs: []string{
-			"proto_version '2'",
-			fmt.Sprintf("publication_names '%s'", r.publicationName),
-			"messages 'true'",
-			"streaming 'true'",
-		},
-	})
+	pluginArguments := []string{
+		"proto_version '2'",
+		fmt.Sprintf("publication_names '%s'", r.publicationName),
+	}
+
+	startOpts := pglogrepl.StartReplicationOptions{
+		PluginArgs: pluginArguments,
+		Mode:       pglogrepl.LogicalReplication,
+	}
+
+	r.logger.Debug().
+		Str("slot", r.slotName).
+		Str("publication", r.publicationName).
+		Str("start_lsn", r.clientXLogPos.String()).
+		Strs("plugin_args", pluginArguments).
+		Msg("starting replication")
+
+	err = pglogrepl.StartReplication(ctx, r.conn, r.slotName, r.clientXLogPos, startOpts)
 	if err != nil {
 		return fmt.Errorf("failed to start replication: %w", err)
 	}
@@ -122,34 +139,63 @@ func (r *Reader) processWALMessages(ctx context.Context) error {
 			return err
 		}
 
-		if time.Now().After(nextStandbyMessageDeadline) {
+		now := time.Now()
+		if now.After(nextStandbyMessageDeadline) {
+			r.logger.Debug().
+				Str("wal_position", r.clientXLogPos.String()).
+				Msg("sending standby status update")
+
 			err := pglogrepl.SendStandbyStatusUpdate(ctx, r.conn, pglogrepl.StandbyStatusUpdate{
 				WALWritePosition: r.clientXLogPos,
+				WALFlushPosition: r.clientXLogPos,
+				WALApplyPosition: r.clientXLogPos,
+				ReplyRequested:   true,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to send standby status update: %w", err)
 			}
-			nextStandbyMessageDeadline = time.Now().Add(r.standbyTimeout)
+			nextStandbyMessageDeadline = now.Add(r.standbyTimeout)
 		}
 
-		messageCtx, cancel := context.WithDeadline(ctx, nextStandbyMessageDeadline)
-		rawMsg, err := r.conn.ReceiveMessage(messageCtx)
-		cancel()
+		// Set a deadline for the next message receive operation
+		deadline := time.Now().Add(1 * time.Second)
+		if err := r.conn.Conn().SetDeadline(deadline); err != nil {
+			return fmt.Errorf("failed to set connection deadline: %w", err)
+		}
 
+		rawMsg, err := r.conn.ReceiveMessage(ctx)
 		if err != nil {
 			if pgconn.Timeout(err) {
+				// Reset deadline after timeout
+				if err := r.conn.Conn().SetDeadline(time.Time{}); err != nil {
+					return fmt.Errorf("failed to reset connection deadline: %w", err)
+				}
 				continue
 			}
 			return fmt.Errorf("failed to receive message: %w", err)
 		}
 
+		// Reset deadline after successful receive
+		if err := r.conn.Conn().SetDeadline(time.Time{}); err != nil {
+			return fmt.Errorf("failed to reset connection deadline: %w", err)
+		}
+
 		if errMsg, ok := rawMsg.(*pgproto3.ErrorResponse); ok {
+			r.logger.Error().
+				Str("severity", errMsg.Severity).
+				Str("code", errMsg.Code).
+				Str("message", errMsg.Message).
+				Str("detail", errMsg.Detail).
+				Msg("received Postgres error")
 			return fmt.Errorf("received Postgres WAL error: %+v", errMsg)
 		}
 
 		msg, ok := rawMsg.(*pgproto3.CopyData)
 		if !ok {
-			r.logger.Debug().Msgf("received unexpected message: %T", rawMsg)
+			r.logger.Debug().
+				Str("type", fmt.Sprintf("%T", rawMsg)).
+				Interface("msg", rawMsg).
+				Msg("received unexpected message type")
 			continue
 		}
 
@@ -202,8 +248,12 @@ func (r *Reader) handleXLogData(_ context.Context, data []byte, inStream *bool) 
 		return fmt.Errorf("failed to process message: %w", err)
 	}
 
+	// Update LSN and persist it
 	if xld.WALStart > r.clientXLogPos {
 		r.clientXLogPos = xld.WALStart
+		if err := r.lsnStorage.Set(r.publicationName, uint64(r.clientXLogPos)); err != nil {
+			r.logger.Warn().Err(err).Msg("failed to persist LSN")
+		}
 	}
 
 	return nil
@@ -214,6 +264,10 @@ func (r *Reader) processMessage(walData []byte, inStream *bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse logical replication message: %w", err)
 	}
+
+	r.logger.Debug().
+		Str("message_type", fmt.Sprintf("%T", logicalMsg)).
+		Msg("received logical replication message")
 
 	switch msg := logicalMsg.(type) {
 	case *pglogrepl.RelationMessageV2:
@@ -240,10 +294,12 @@ func (r *Reader) processMessage(walData []byte, inStream *bool) error {
 
 	case *pglogrepl.StreamStartMessageV2:
 		*inStream = true
+		r.logger.Debug().Msg("stream started")
 		return nil
 
 	case *pglogrepl.StreamStopMessageV2:
 		*inStream = false
+		r.logger.Debug().Msg("stream stopped")
 		return nil
 
 	default:
@@ -325,6 +381,12 @@ func (r *Reader) handleUpdateMessage(msg *pglogrepl.UpdateMessageV2) error {
 		return fmt.Errorf("unknown relation ID %d", msg.RelationID)
 	}
 
+	r.logger.Debug().
+		Str("schema", rel.Namespace).
+		Str("table", rel.RelationName).
+		Uint32("relation_id", msg.RelationID).
+		Msg("handling update message")
+
 	oldValues, err := r.decodeTupleData(msg.OldTuple, rel)
 	if err != nil {
 		return err
@@ -334,6 +396,11 @@ func (r *Reader) handleUpdateMessage(msg *pglogrepl.UpdateMessageV2) error {
 	if err != nil {
 		return err
 	}
+
+	r.logger.Debug().
+		Interface("old_values", oldValues).
+		Interface("new_values", newValues).
+		Msg("decoded update values")
 
 	return r.messageHandler(&model.Message{
 		Operation: "UPDATE",
