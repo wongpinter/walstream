@@ -7,15 +7,22 @@ database:
   sslmode: disable
 
 replication:
-  slot_name: walstreamer_slot
   publication_name: walstreamer_pub
-  default_ops: ["INSERT", "UPDATE", "DELETE"]
+  slot_name: walstreamer_slot
+  standby_timeout: 10 # in seconds
   tables:
     - public.inventory
+  default_ops:
+    - INSERT
+    - UPDATE
+    - DELETE
   table_configs:
     - name: public.inventory
       operations: ["INSERT", "UPDATE", "DELETE"]
-  standby_timeout: 10
+  reconnect:
+    max_attempts: 0  # 0 means unlimited
+    initial_delay: 1  # in seconds
+    max_delay: 30    # in seconds
   initial_sync: true
   batch_size: 1000
 

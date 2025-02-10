@@ -143,12 +143,15 @@ func main() {
 
 	// Create WAL reader config
 	walConfig := wal.Config{
-		ConnString:      cfg.Database.GetReplicationDSN(),
-		PublicationName: cfg.Replication.PublicationName,
-		SlotName:        cfg.Replication.SlotName,
-		StandbyTimeout:  time.Duration(cfg.Replication.StandbyTimeout) * time.Second,
-		Logger:          log.Logger,
-		LSNStorage:      storage,
+		ConnString:            cfg.Database.GetReplicationDSN(),
+		PublicationName:       cfg.Replication.PublicationName,
+		SlotName:              cfg.Replication.SlotName,
+		StandbyTimeout:        time.Duration(cfg.Replication.StandbyTimeout) * time.Second,
+		Logger:                log.Logger,
+		LSNStorage:            storage,
+		MaxReconnectAttempts:  cfg.Replication.Reconnect.MaxAttempts,
+		ReconnectInitialDelay: time.Duration(cfg.Replication.Reconnect.InitialDelay) * time.Second,
+		ReconnectMaxDelay:     time.Duration(cfg.Replication.Reconnect.MaxDelay) * time.Second,
 	}
 
 	// Create message handler that publishes to broker
