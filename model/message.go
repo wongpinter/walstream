@@ -44,7 +44,19 @@ type ForeignKey struct {
 	OnUpdate         string   `json:"on_update"`         // ON UPDATE action
 }
 
-// Message represents a change event from the WAL
+// MessageFormat defines the type of message format to be used
+type MessageFormat string
+
+const (
+	// CompleteFormat includes all fields in the message
+	CompleteFormat MessageFormat = "complete"
+	// RegularFormat includes only essential fields
+	RegularFormat MessageFormat = "regular"
+	// CompactFormat includes minimal fields for efficiency
+	CompactFormat MessageFormat = "compact"
+)
+
+// Message represents a WAL message
 type Message struct {
 	// Event metadata
 	ID            string    `json:"id"`             // Unique event ID
@@ -67,6 +79,56 @@ type Message struct {
 	Tags         map[string]string      `json:"tags,omitempty"`         // Custom tags
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`     // Additional metadata
 	DebugContext map[string]interface{} `json:"debug_context,omitempty"` // Debug information
+}
+
+// RegularMessage represents a message with regular format
+type RegularMessage struct {
+	ID        string                 `json:"id"`
+	Operation string                 `json:"operation"`
+	Schema    string                 `json:"schema"`
+	Table     string                 `json:"table"`
+	Before    map[string]interface{} `json:"before,omitempty"`
+	After     map[string]interface{} `json:"after,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+}
+
+// CompactMessage represents a message with compact format
+type CompactMessage struct {
+	ID        string                 `json:"id"`
+	Operation string                 `json:"operation"`
+	Schema    string                 `json:"schema"`
+	Table     string                 `json:"table"`
+	Before    map[string]interface{} `json:"before,omitempty"`
+	After     map[string]interface{} `json:"after,omitempty"`
+}
+
+// ToFormat converts the message to the specified format
+func (m *Message) ToFormat(format MessageFormat) interface{} {
+	switch format {
+	case CompleteFormat:
+		return m
+	case RegularFormat:
+		return &RegularMessage{
+			ID:        m.ID,
+			Operation: m.Operation,
+			Schema:    m.Schema,
+			Table:     m.Table,
+			Before:    m.Before,
+			After:     m.After,
+			Timestamp: m.Timestamp,
+		}
+	case CompactFormat:
+		return &CompactMessage{
+			ID:        m.ID,
+			Operation: m.Operation,
+			Schema:    m.Schema,
+			Table:     m.Table,
+			Before:    m.Before,
+			After:     m.After,
+		}
+	default:
+		return m
+	}
 }
 
 // MarshalJSON implements custom JSON marshaling to handle PostgreSQL-specific types

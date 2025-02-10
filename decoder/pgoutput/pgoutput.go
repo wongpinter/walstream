@@ -307,10 +307,6 @@ func (d *PgOutputDecoder) parseTupleData(data []byte, relationId uint32) (map[st
 		return nil, fmt.Errorf("relation %d not found", relationId)
 	}
 
-	// For debugging
-	fmt.Printf("Tuple data: %v\n", data[:min(len(data), 32)])
-	fmt.Printf("Relation ID: %d, Expected columns: %d, Got columns: %d\n", relationId, len(relation.columns), numColumns)
-
 	// Check if column count matches
 	if numColumns != len(relation.columns) {
 		return nil, fmt.Errorf("column count mismatch: got %d, expected %d (first 32 bytes: %v)",
