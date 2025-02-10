@@ -16,6 +16,7 @@ import (
 	"repo.nusatek.id/sugeng/walstreamer/broker"
 	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
 	"repo.nusatek.id/sugeng/walstreamer/broker/nats"
+	"repo.nusatek.id/sugeng/walstreamer/broker/pubsub"
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
 	"repo.nusatek.id/sugeng/walstreamer/model"
@@ -80,6 +81,18 @@ func main() {
 			log.Fatal().Err(err).Msg("Failed to create NATS broker")
 		}
 		messageBroker = natsBroker
+	case "pubsub":
+		pubsubConfig := pubsub.Config{
+			ProjectID:       cfg.Broker.PubSub.ProjectID,
+			TopicID:        cfg.Broker.PubSub.TopicID,
+			CredentialsFile: cfg.Broker.PubSub.CredentialsFile,
+			Logger:         log.Logger,
+		}
+		pubsubBroker, err := pubsub.NewBroker(pubsubConfig)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to create Pub/Sub broker")
+		}
+		messageBroker = pubsubBroker
 	default:
 		messageBroker = inmemory.NewInMemoryBroker(brokerConfig)
 		log.Info().Str("type", cfg.Broker.Type).Msg("Using in-memory broker")

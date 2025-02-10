@@ -48,24 +48,6 @@ func (c *DatabaseConfig) Validate() error {
 	return nil
 }
 
-// Validate checks if the broker configuration is valid
-func (c *BrokerConfig) Validate() error {
-	switch c.Type {
-	case "inmemory":
-		// No additional validation needed
-	case "kafka", "nats":
-		if len(c.Hosts) == 0 {
-			return fmt.Errorf("hosts are required for %s broker", c.Type)
-		}
-		if c.Topic == "" {
-			return fmt.Errorf("topic is required for %s broker", c.Type)
-		}
-	default:
-		return fmt.Errorf("unsupported broker type: %s", c.Type)
-	}
-	return nil
-}
-
 // Validate checks if the LSN configuration is valid
 func (c *LSNConfig) Validate() error {
 	switch c.Type {
