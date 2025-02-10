@@ -1,7 +1,30 @@
-postgres:
-  host: localhost
+database:
+  host: Cosmic-Echo.local
   port: 5432
-  user: postgres
-  password: password
-  database: postgres
+  user: guest
+  password: guest
+  dbname: local
   sslmode: disable
+
+replication:
+  slot_name: walstreamer_slot
+  publication_name: walstreamer_pub
+  tables: # Format: "schema.table", prefix with "!" to exclude
+    - "public.inventory" # Include inventory table
+  standby_timeout: 10s
+
+broker:
+  type: inmemory # inmemory, kafka, nats
+  hosts: []
+  topic: walstreamer
+  username: ""
+  password: ""
+
+lsn:
+  type: file # file, postgres
+  path: ./data/lsn
+  persist_interval: 5s
+
+log:
+  level: info # debug, info, warn, error
+  format: console # json, console
