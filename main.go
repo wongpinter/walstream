@@ -51,7 +51,7 @@ func main() {
 	}
 
 	// Initialize in-memory broker
-	broker := inmemory.NewInMemoryBroker(&log.Logger)
+	broker := inmemory.NewInMemoryBroker(model.CompactFormat)
 
 	// Create LSN storage
 	storage, err := lsn.NewFileStorage(cfg.LSN.Path, time.Duration(cfg.LSN.PersistInterval)*time.Second)
@@ -116,7 +116,7 @@ func main() {
 		}
 
 		// Print message details for debugging
-		log.Info().
+		log.Debug().
 			Str("operation", msg.Operation).
 			Str("schema", msg.Schema).
 			Str("table", msg.Table).
