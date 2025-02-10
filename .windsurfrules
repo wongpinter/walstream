@@ -1,0 +1,152 @@
+Project: walstreamer - PostgreSQL Change Data Capture (CDC) Package
+
+snippets codes @/requirement/ 
+
+Goal: Develop a Go package, walstreamer, that replicates the core functionality of Debezium for capturing changes from a PostgreSQL database and streaming them to a message broker.
+
+Core Functionality:
+
+WAL (Write-Ahead Log) Reader:
+
+Technology: Utilize PostgreSQLs logical replication mechanism and the pgx/v5 library to read the WAL.
+
+Decoding: Decode the WAL entries into meaningful change events (INSERT, UPDATE, DELETE). Handle different data types correctly, including complex types (JSON, arrays, etc.).
+
+Filtering (optional): Optionally, decode and filter events before sending them to the output channel, based on table name, specific columns, or data values (useful for bandwidth optimization).
+
+Error Handling: Implement robust error handling, including handling connection drops, decoding errors, and WAL parsing issues. Retry connections with exponential backoff and jitter. Log errors clearly using zerolog.
+
+LSN (Log Sequence Number) Tracking: Maintain and persist the last processed LSN to ensure no data loss upon restart. Store the LSN in a configurable location (e.g., a separate PostgreSQL table, a file, or an in-memory cache with periodic persistence).
+
+Publication and Slot Management: Handle publication, replication slot creation and management and if already exists then just skip.
+
+Change Event Structuring:
+
+Payload Format: Construct a consistent JSON payload for each change event. The payload must include:
+
+operation: "INSERT", "UPDATE", "DELETE" (consider also "CREATE" for table creation, "ALTER" for schema changes, and "TRUNCATE" for table truncation - add these as optional stretch goals).
+
+table: The fully qualified name of the table (schema.table).
+
+before: The old values of the row (for UPDATE and DELETE operations; null for INSERT). This should be a JSON object representing the row data before the change.
+
+after: The new values of the row (for INSERT and UPDATE operations; null for DELETE). This should be a JSON object representing the row data after the change.
+
+timestamp: The timestamp of the change event (ideally from the PostgreSQL transaction).
+
+lsn: The LSN of the change event.
+
+schema: definition of columns, including: name, type, order, optional.
+
+Message Broker Integration (Abstraction Layer):
+
+Abstraction: Implement an interface (e.g., Broker with Publish(ctx context.Context, message []byte) error and Close() error methods) that allows for plugging in different message brokers. This is crucial for flexibility.
+
+Example Implementation (choose one or more):
+
+Kafka: Provide a concrete implementation of the Broker interface for Apache Kafka (using segmentio/kafka-go or confluentinc/confluent-kafka-go).
+
+NATS: Provide a concrete implementation of the Broker interface for NATS.
+
+RabbitMQ: (Optional - more complex) Consider adding support for RabbitMQ.
+
+In-Memory (for testing): Crucially, provide an in-memory implementation of the Broker interface for testing purposes. This should simply store messages in a slice or channel.
+
+Configuration:
+
+Flexibility: The package should be highly configurable. Use a configuration struct (e.g., Config) to manage all settings.
+
+Required Settings:
+
+PostgreSQL connection string (including host, port, user, password, database).
+
+Replication slot name.
+
+Publication name.
+
+List of tables to include (empty list means include all tables).
+
+List of tables to exclude (takes precedence over include list).
+
+Message broker connection details (specific to the chosen broker).
+
+LSN persistence configuration (e.g., storage location, persistence interval).
+
+Logging level (for zerolog).
+
+Optional: Schema for the configuration.
+
+Logging:
+
+Zerolog: Use zerolog for structured logging throughout the package.
+
+Contextual Logging: Include relevant context in log messages, such as the current LSN, table name, and any error details.
+
+Levels: Use appropriate log levels (DEBUG, INFO, WARN, ERROR, FATAL).
+
+Testing:
+
+Unit Tests: Write comprehensive unit tests for individual components (WAL decoding, message structuring, broker interface implementations).
+
+Integration Tests: Write integration tests that verify the entire pipeline from PostgreSQL to the message broker (using the in-memory broker implementation and ideally a test PostgreSQL instance). Use a testcontainer for PostgreSQL.
+
+Test Coverage: Aim for high test coverage.
+
+Error handling:
+
+Publication, Slot, Connection Error: error in creating publication, slot, or connection to database or broker, application should stop immediately.
+
+Publishing Error: error publishing message should be retried for sometimes before stop the application.
+
+Code Structure:
+
+Modularity: Design the package with clear separation of concerns. Separate modules for WAL reading, message formatting, broker interaction, and configuration.
+
+Interfaces: Use interfaces to define the boundaries between modules and enable easy swapping of implementations.
+
+Go Conventions: Follow standard Go coding conventions and best practices.
+
+Documentation: Document the code thoroughly using GoDoc. Include examples of how to use the package.
+
+Example Usage (Conceptual):
+
+package main
+
+import (
+	"context"
+	"log"
+
+	"github.com/yourusername/walstreamer"
+	"github.com/yourusername/walstreamer/broker/inmemory" // Or /broker/kafka, etc.
+)
+
+func main() {
+	cfg := walstreamer.Config{
+		PostgresConnectionString: "postgres://user:password@host:5432/dbname?sslmode=disable",
+		ReplicationSlotName:    "walstreamer_slot",
+		PublicationName:        "walstreamer_pub",
+		IncludedTables:         []string{"public.users", "public.products"},
+        // ... other config options ...
+	}
+
+    inmemoryBroker := inmemory.NewInMemoryBroker()
+
+	streamer, err := walstreamer.NewStreamer(cfg, inmemoryBroker)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		if err := streamer.Start(ctx); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+    // Consume messages from the in-memory broker (for demonstration)
+	for msg := range inmemoryBroker.Messages() {
+		log.Printf("Received message: %s", string(msg))
+	}
+}
