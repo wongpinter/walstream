@@ -31,12 +31,65 @@ type DatabaseConfig struct {
 	SSLMode  string `koanf:"sslmode"`
 }
 
-// ReplicationConfig holds replication-specific configuration
+// TableConfig defines configuration for a specific table
+type TableConfig struct {
+	Name       string   `yaml:"name"`       // Full table name (schema.table)
+	Operations []string `yaml:"operations"` // List of operations to listen for (INSERT, UPDATE, DELETE)
+}
+
+// ReplicationConfig holds replication-related configuration
 type ReplicationConfig struct {
-	SlotName        string   `koanf:"slot_name"`
-	PublicationName string   `koanf:"publication_name"`
-	Tables          []string `koanf:"tables"` // Format: "schema.table", prefix with "!" to exclude
-	StandbyTimeout  Duration `koanf:"standby_timeout"`
+	PublicationName string        `koanf:"publication_name"`
+	SlotName        string        `koanf:"slot_name"`
+	StandbyTimeout  int           `koanf:"standby_timeout"`
+	Tables          []string      `koanf:"tables"`        // For backward compatibility
+	TableConfigs    []TableConfig `koanf:"table_configs"` // New table-specific configurations
+	DefaultOps      []string      `koanf:"default_ops"`   // Default operations for tables without specific config
+}
+
+func (c *ReplicationConfig) Validate() error {
+	if c.PublicationName == "" {
+		return fmt.Errorf("publication_name is required")
+	}
+	if c.SlotName == "" {
+		return fmt.Errorf("slot_name is required")
+	}
+	if c.StandbyTimeout <= 0 {
+		return fmt.Errorf("standby_timeout must be positive")
+	}
+
+	// Validate operations
+	validOps := map[string]bool{"INSERT": true, "UPDATE": true, "DELETE": true}
+
+	// Validate default operations
+	for _, op := range c.DefaultOps {
+		if !validOps[op] {
+			return fmt.Errorf("invalid default operation: %s", op)
+		}
+	}
+
+	// If no default operations specified, use all
+	if len(c.DefaultOps) == 0 {
+		c.DefaultOps = []string{"INSERT", "UPDATE", "DELETE"}
+	}
+
+	// Validate table configs
+	for _, tc := range c.TableConfigs {
+		if tc.Name == "" {
+			return fmt.Errorf("table name is required in table_configs")
+		}
+		if len(tc.Operations) == 0 {
+			tc.Operations = c.DefaultOps
+		} else {
+			for _, op := range tc.Operations {
+				if !validOps[op] {
+					return fmt.Errorf("invalid operation '%s' for table %s", op, tc.Name)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // BrokerConfig holds message broker configuration

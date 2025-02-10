@@ -9,9 +9,13 @@ database:
 replication:
   slot_name: walstreamer_slot
   publication_name: walstreamer_pub
+  default_ops: ["INSERT", "UPDATE", "DELETE"]
   tables:
     - public.inventory
-  standby_timeout: 10s
+  table_configs:
+    - name: public.inventory
+      operations: ["INSERT", "UPDATE", "DELETE"]
+  standby_timeout: 10
 
 broker:
   type: nats

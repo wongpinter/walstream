@@ -48,20 +48,6 @@ func (c *DatabaseConfig) Validate() error {
 	return nil
 }
 
-// Validate checks if the replication configuration is valid
-func (c *ReplicationConfig) Validate() error {
-	if c.SlotName == "" {
-		return fmt.Errorf("slot_name is required")
-	}
-	if c.PublicationName == "" {
-		return fmt.Errorf("publication_name is required")
-	}
-	if time.Duration(c.StandbyTimeout) < time.Second {
-		return fmt.Errorf("standby_timeout must be at least 1s")
-	}
-	return nil
-}
-
 // Validate checks if the broker configuration is valid
 func (c *BrokerConfig) Validate() error {
 	switch c.Type {

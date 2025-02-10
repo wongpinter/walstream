@@ -114,7 +114,7 @@ func TestConfig_Validate(t *testing.T) {
 				Replication: ReplicationConfig{
 					SlotName:        "walstreamer_slot",
 					PublicationName: "walstreamer_pub",
-					StandbyTimeout:  Duration(10 * time.Second),
+					StandbyTimeout:  int(Duration(10 * time.Second)),
 				},
 				Broker: BrokerConfig{
 					Type:  "inmemory",
