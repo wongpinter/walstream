@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
 	"repo.nusatek.id/sugeng/walstreamer/model"
@@ -48,6 +49,9 @@ func main() {
 	if cfg.Log.Format == "console" {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 	}
+
+	// Initialize in-memory broker
+	broker := inmemory.NewInMemoryBroker(&log.Logger)
 
 	// Create LSN storage
 	storage, err := lsn.NewFileStorage(cfg.LSN.Path, time.Duration(cfg.LSN.PersistInterval)*time.Second)
@@ -123,6 +127,16 @@ func main() {
 			Msg("received WAL message")
 
 		// Publish message to broker
+		if err := broker.Publish(context.Background(), msg); err != nil {
+			return fmt.Errorf("failed to publish message: %w", err)
+		}
+
+		// Print messages from broker (for debugging)
+		messages := broker.GetMessages()
+		log.Debug().
+			Int("message_count", len(messages)).
+			Msg("messages in broker")
+
 		return nil
 	}
 
