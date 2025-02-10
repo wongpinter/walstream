@@ -84,9 +84,10 @@ func main() {
 	case "pubsub":
 		pubsubConfig := pubsub.Config{
 			ProjectID:       cfg.Broker.PubSub.ProjectID,
-			TopicID:        cfg.Broker.PubSub.TopicID,
+			TopicPrefix:     cfg.Broker.PubSub.TopicPrefix,
 			CredentialsFile: cfg.Broker.PubSub.CredentialsFile,
-			Logger:         log.Logger,
+			AutoCreateTopic: cfg.Broker.PubSub.AutoCreateTopic,
+			Logger:          log.Logger,
 		}
 		pubsubBroker, err := pubsub.NewBroker(pubsubConfig)
 		if err != nil {
@@ -114,11 +115,11 @@ func main() {
 	}
 
 	// Parse table filters
-	for _, pattern := range cfg.Replication.Tables {
-		if strings.HasPrefix(pattern, "!") {
-			replConfig.ExcludedTables = append(replConfig.ExcludedTables, strings.TrimPrefix(pattern, "!"))
-		} else if pattern != "" {
-			replConfig.IncludedTables = append(replConfig.IncludedTables, pattern)
+	for _, table := range cfg.Replication.Tables {
+		if strings.HasPrefix(table.Name, "!") {
+			replConfig.ExcludedTables = append(replConfig.ExcludedTables, strings.TrimPrefix(table.Name, "!"))
+		} else if table.Name != "" {
+			replConfig.IncludedTables = append(replConfig.IncludedTables, table.Name)
 		}
 	}
 
@@ -169,65 +170,46 @@ func main() {
 
 	// Create message handler that publishes to broker
 	messageHandler := func(msg *model.Message) error {
-		// Check if table is in filter list
-		tableFullName := fmt.Sprintf("%s.%s", msg.Schema, msg.Table)
+		// Get table name
+		tableFullName := msg.Table
+		if tableFullName == "" {
+			log.Debug().Msg("skipping message without table name")
+			return nil
+		}
 
+		// Log table information
 		log.Debug().
 			Str("table", tableFullName).
-			Strs("configured_tables", cfg.Replication.Tables).
-			Int("table_configs_count", len(cfg.Replication.TableConfigs)).
-			Msg("checking table filters")
+			Strs("patterns", getTableNames(cfg.Replication.Tables)).
+			Msg("Checking table patterns")
 
-		// First check exclusions
-		for _, pattern := range cfg.Replication.Tables {
-			if strings.HasPrefix(pattern, "!") && tableFullName == strings.TrimPrefix(pattern, "!") {
-				log.Debug().
-					Str("table", tableFullName).
-					Str("pattern", pattern).
-					Msg("table excluded by pattern")
-				return nil // Skip excluded table
-			}
-		}
-
-		// Check if table has specific configuration
-		var allowedOps []string
-		for _, tc := range cfg.Replication.TableConfigs {
-			if tc.Name == tableFullName {
-				allowedOps = tc.Operations
-				log.Debug().
-					Str("table", tableFullName).
-					Strs("operations", tc.Operations).
-					Msg("found specific table config")
-				break
-			}
-		}
-
-		// If no specific config found, check if table is in general include list
-		if allowedOps == nil {
-			tableIncluded := len(cfg.Replication.Tables) == 0 // Empty list means include all
-			for _, pattern := range cfg.Replication.Tables {
-				if !strings.HasPrefix(pattern, "!") && (pattern == "" || pattern == tableFullName) {
-					tableIncluded = true
-					break
-				}
-			}
-			if !tableIncluded {
-				log.Debug().
-					Str("table", tableFullName).
-					Strs("included_tables", cfg.Replication.Tables).
-					Msg("table not in include list")
-				return nil // Skip table not in include list
-			}
-			allowedOps = cfg.Replication.DefaultOps
+		// Check if table is allowed
+		if !isTableAllowed(cfg, tableFullName) {
 			log.Debug().
 				Str("table", tableFullName).
-				Strs("default_ops", cfg.Replication.DefaultOps).
-				Msg("using default operations")
+				Msg("Table not in configured list")
+			return nil
+		}
+
+		// Get operations for the table
+		operations := getTableOperations(cfg, tableFullName)
+		log.Debug().
+			Str("table", tableFullName).
+			Strs("operations", operations).
+			Msg("Table operations")
+
+		// Get topic for the table if specified
+		topic := getTableTopic(cfg, tableFullName)
+		if topic != "" {
+			log.Debug().
+				Str("table", tableFullName).
+				Str("topic", topic).
+				Msg("Using custom topic for table")
 		}
 
 		// Check if operation is allowed
 		operationAllowed := false
-		for _, op := range allowedOps {
+		for _, op := range operations {
 			if op == msg.Operation {
 				operationAllowed = true
 				break
@@ -237,7 +219,7 @@ func main() {
 			log.Debug().
 				Str("operation", msg.Operation).
 				Str("table", tableFullName).
-				Strs("allowed_ops", allowedOps).
+				Strs("allowed_ops", operations).
 				Msg("skipping message due to operation filter")
 			return nil
 		}
@@ -292,4 +274,64 @@ func main() {
 	if err := reader.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("WAL reader failed")
 	}
+}
+
+// getTablePatterns returns a list of table patterns to include
+func getTablePatterns(cfg *config.Config) []string {
+	patterns := make([]string, 0, len(cfg.Replication.Tables))
+	for _, table := range cfg.Replication.Tables {
+		if table.Name != "" {
+			patterns = append(patterns, table.Name)
+		}
+	}
+	return patterns
+}
+
+// getTableOperations returns the operations for a given table
+func getTableOperations(cfg *config.Config, tableName string) []string {
+	for _, table := range cfg.Replication.Tables {
+		if table.Name == tableName {
+			if len(table.Operations) > 0 {
+				return table.Operations
+			}
+			break
+		}
+	}
+	return cfg.Replication.DefaultOps
+}
+
+// getTableTopic returns the topic for a given table
+func getTableTopic(cfg *config.Config, tableName string) string {
+	for _, table := range cfg.Replication.Tables {
+		if table.Name == tableName {
+			return table.Topic
+		}
+	}
+	return ""
+}
+
+// isTableAllowed checks if the table should be processed
+func isTableAllowed(cfg *config.Config, tableFullName string) bool {
+	// If no tables configured, allow all
+	if len(cfg.Replication.Tables) == 0 {
+		return true
+	}
+
+	// Check if table is in the configured list
+	for _, table := range cfg.Replication.Tables {
+		if table.Name == tableFullName {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getTableNames extracts table names from TableConfig slice
+func getTableNames(tables []config.TableConfig) []string {
+	names := make([]string, len(tables))
+	for i, t := range tables {
+		names[i] = t.Name
+	}
+	return names
 }

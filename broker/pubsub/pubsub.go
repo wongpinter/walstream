@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/pubsub"
@@ -19,10 +20,12 @@ import (
 type Config struct {
 	// ProjectID is the Google Cloud project ID
 	ProjectID string
-	// TopicID is the Pub/Sub topic ID
-	TopicID string
+	// TopicPrefix is the prefix for auto-generated topics
+	TopicPrefix string
 	// CredentialsFile is the path to the JSON credentials file
 	CredentialsFile string
+	// AutoCreateTopic determines whether to create topics automatically
+	AutoCreateTopic bool
 	// Logger is the zerolog logger instance
 	Logger zerolog.Logger
 }
@@ -30,11 +33,12 @@ type Config struct {
 // Broker implements the broker.Broker interface for Google Cloud Pub/Sub
 type Broker struct {
 	client       *pubsub.Client
-	topic        *pubsub.Topic
+	topics       map[string]*pubsub.Topic
 	logger       zerolog.Logger
 	metrics      broker.BrokerMetrics
 	validators   []broker.MessageValidator
 	transformers []broker.MessageTransformer
+	config       Config
 }
 
 // NewBroker creates a new Google Cloud Pub/Sub broker
@@ -47,21 +51,43 @@ func NewBroker(cfg Config) (*Broker, error) {
 		return nil, fmt.Errorf("failed to create pubsub client: %w", err)
 	}
 
+	return &Broker{
+		client:       client,
+		topics:       make(map[string]*pubsub.Topic),
+		logger:       cfg.Logger,
+		metrics:      broker.BrokerMetrics{},
+		validators:   make([]broker.MessageValidator, 0),
+		transformers: make([]broker.MessageTransformer, 0),
+		config:       cfg,
+	}, nil
+}
+
+// getTopicForTable gets or creates a Pub/Sub topic for the given table
+func (b *Broker) getTopicForTable(ctx context.Context, table string) (*pubsub.Topic, error) {
+	// Check if we already have the topic
+	if topic, ok := b.topics[table]; ok {
+		return topic, nil
+	}
+
+	// Generate topic ID from table name
+	topicID := b.config.TopicPrefix + strings.Replace(table, ".", "-", -1)
+
 	// Get or create topic
-	topic := client.Topic(cfg.TopicID)
+	topic := b.client.Topic(topicID)
 	exists, err := topic.Exists(ctx)
 	if err != nil {
-		client.Close()
 		return nil, fmt.Errorf("failed to check if topic exists: %w", err)
 	}
 
 	if !exists {
-		topic, err = client.CreateTopic(ctx, cfg.TopicID)
+		if !b.config.AutoCreateTopic {
+			return nil, fmt.Errorf("topic %s does not exist and auto-create is disabled", topicID)
+		}
+		topic, err = b.client.CreateTopic(ctx, topicID)
 		if err != nil {
-			client.Close()
 			return nil, fmt.Errorf("failed to create topic: %w", err)
 		}
-		cfg.Logger.Info().Str("topic", cfg.TopicID).Msg("created new pubsub topic")
+		b.logger.Info().Str("topic", topicID).Msg("created new pubsub topic")
 	}
 
 	// Configure topic settings
@@ -70,14 +96,9 @@ func NewBroker(cfg Config) (*Broker, error) {
 		CountThreshold: 1, // Send immediately for real-time replication
 	}
 
-	return &Broker{
-		client:       client,
-		topic:        topic,
-		logger:       cfg.Logger,
-		metrics:      broker.BrokerMetrics{},
-		validators:   make([]broker.MessageValidator, 0),
-		transformers: make([]broker.MessageTransformer, 0),
-	}, nil
+	// Cache the topic
+	b.topics[table] = topic
+	return topic, nil
 }
 
 // Publish publishes a message to Google Cloud Pub/Sub
@@ -105,6 +126,15 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 		}
 	}
 
+	// Get topic for this table
+	topic, err := b.getTopicForTable(ctx, message.Table)
+	if err != nil {
+		b.metrics.MessagesFailed++
+		b.metrics.LastError = err
+		b.metrics.LastErrorTime = time.Now()
+		return fmt.Errorf("failed to get topic for table %s: %w", message.Table, err)
+	}
+
 	// Convert message to JSON
 	data, err := json.Marshal(transformed)
 	if err != nil {
@@ -126,7 +156,7 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 	}
 
 	// Publish message
-	result := b.topic.Publish(ctx, msg)
+	result := topic.Publish(ctx, msg)
 	id, err := result.Get(ctx)
 	if err != nil {
 		b.metrics.MessagesFailed++
@@ -139,6 +169,7 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 		Str("message_id", id).
 		Str("operation", message.Operation).
 		Str("table", message.Table).
+		Str("topic", topic.ID()).
 		Uint64("lsn", message.LSN).
 		Msg("published message to pubsub")
 
@@ -172,19 +203,24 @@ func (b *Broker) AddTransformer(transformer broker.MessageTransformer) {
 
 // Flush forces any buffered messages to be sent
 func (b *Broker) Flush(ctx context.Context) error {
-	b.topic.Stop() // Stop accepting new messages
+	// Stop all topics
+	for _, topic := range b.topics {
+		topic.Stop()
+	}
 	return nil
 }
 
 // Health returns the current health status
 func (b *Broker) Health(ctx context.Context) error {
-	// Check if topic exists
-	exists, err := b.topic.Exists(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to check topic health: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("topic does not exist")
+	// Check if all topics exist
+	for table, topic := range b.topics {
+		exists, err := topic.Exists(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to check topic health for table %s: %w", table, err)
+		}
+		if !exists {
+			return fmt.Errorf("topic for table %s does not exist", table)
+		}
 	}
 	return nil
 }
@@ -194,8 +230,11 @@ func (b *Broker) Metrics() broker.BrokerMetrics {
 	return b.metrics
 }
 
-// Close closes the Pub/Sub client and topic
+// Close closes all topics and the Pub/Sub client
 func (b *Broker) Close() error {
-	b.topic.Stop()
+	// Stop all topics
+	for _, topic := range b.topics {
+		topic.Stop()
+	}
 	return b.client.Close()
 }
