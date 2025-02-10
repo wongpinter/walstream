@@ -474,8 +474,16 @@ func (d *PgOutputDecoder) parseValue(data []byte, typeOid uint32) (interface{}, 
 	case OIDNumeric:
 		// Try text format first
 		if _, err := fmt.Sscanf(strVal, "%f", new(float64)); err == nil {
-			return strVal, nil
+			// Parse as float64 to maintain precision
+			var f float64
+			if _, err := fmt.Sscanf(strVal, "%f", &f); err == nil {
+				// Format with up to 10 decimal places, trim trailing zeros
+				s := fmt.Sprintf("%.10f", f)
+				s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+				return s, nil
+			}
 		}
+
 		// Try binary format
 		if len(data) < 8 {
 			return nil, fmt.Errorf("invalid numeric length: %d", len(data))
@@ -485,8 +493,19 @@ func (d *PgOutputDecoder) parseValue(data []byte, typeOid uint32) (interface{}, 
 		weight := int16(binary.BigEndian.Uint16(data[2:4]))
 		sign := binary.BigEndian.Uint16(data[4:6])
 		dscale := binary.BigEndian.Uint16(data[6:8])
-		digits := make([]int16, numDigits)
 
+		// Handle zero value
+		if numDigits == 0 {
+			if dscale == 0 {
+				return "0", nil
+			}
+			// Return zero with proper scale
+			return fmt.Sprintf("%s0.%s",
+				map[uint16]string{0x4000: "-", 0: ""}[sign],
+				strings.Repeat("0", int(dscale))), nil
+		}
+
+		digits := make([]int16, numDigits)
 		for i := 0; i < int(numDigits); i++ {
 			start := 8 + (i * 2)
 			if start+2 > len(data) {
@@ -495,52 +514,67 @@ func (d *PgOutputDecoder) parseValue(data []byte, typeOid uint32) (interface{}, 
 			digits[i] = int16(binary.BigEndian.Uint16(data[start : start+2]))
 		}
 
-		// Convert to string representation
+		// Convert to string representation with proper scale
 		var result strings.Builder
+
+		// Add sign
 		if sign == 0x4000 {
 			result.WriteString("-")
 		}
 
-		if numDigits == 0 {
-			return "0", nil
-		}
-
 		// Calculate the position of decimal point
-		decimalPoint := int((weight + 1) * 4)
+		decimalPoint := (weight + 1) * 4
 
-		// Build the number string
-		digitsAdded := 0
-		for i, d := range digits {
-			currentPos := i * 4
-			if currentPos == decimalPoint {
+		// Add leading zeros if needed
+		if decimalPoint <= 0 {
+			result.WriteString("0")
+			if dscale > 0 {
 				result.WriteString(".")
+				result.WriteString(strings.Repeat("0", int(-decimalPoint)))
 			}
-			result.WriteString(fmt.Sprintf("%04d", d))
+		}
+
+		// Add digits with proper decimal point
+		digitsAdded := 0
+		for _, d := range digits {
+			dStr := fmt.Sprintf("%04d", d)
+
+			// Handle leading digits
+			if digitsAdded < int(decimalPoint) {
+				result.WriteString(dStr)
+			} else {
+				// We're past the decimal point
+				if digitsAdded == int(decimalPoint) {
+					result.WriteString(".")
+				}
+				result.WriteString(dStr)
+			}
 			digitsAdded += 4
 		}
 
-		// Add trailing zeros if needed
-		for digitsAdded < decimalPoint {
-			result.WriteString("0000")
-			digitsAdded += 4
+		// Add trailing zeros to match scale
+		if dscale > 0 {
+			remaining := int(dscale) - (digitsAdded - int(decimalPoint))
+			if remaining > 0 {
+				if digitsAdded <= int(decimalPoint) {
+					result.WriteString(".")
+				}
+				result.WriteString(strings.Repeat("0", remaining))
+			}
 		}
 
-		// Add decimal point and trailing zeros if dscale > 0
-		if dscale > 0 && digitsAdded <= decimalPoint {
-			result.WriteString(".")
-		}
-
-		// Trim leading zeros (except the last one before decimal)
+		// Trim trailing zeros after decimal while preserving scale
 		numStr := result.String()
-		numStr = strings.TrimLeft(numStr, "0")
-		if numStr == "" || numStr[0] == '.' {
-			numStr = "0" + numStr
-		}
-
-		// Trim trailing zeros after decimal
-		if strings.Contains(numStr, ".") {
-			numStr = strings.TrimRight(numStr, "0")
-			numStr = strings.TrimRight(numStr, ".")
+		if dscale > 0 && strings.Contains(numStr, ".") {
+			parts := strings.Split(numStr, ".")
+			if len(parts) == 2 {
+				decimals := parts[1]
+				if len(decimals) > int(dscale) {
+					// Truncate to match scale
+					decimals = decimals[:int(dscale)]
+				}
+				numStr = parts[0] + "." + decimals
+			}
 		}
 
 		return numStr, nil
