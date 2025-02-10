@@ -9,22 +9,27 @@ database:
 replication:
   slot_name: walstreamer_slot
   publication_name: walstreamer_pub
-  tables: # Format: "schema.table", prefix with "!" to exclude
-    - "public.inventory" # Include inventory table
+  tables:
+    - public.inventory
   standby_timeout: 10s
 
 broker:
-  type: inmemory # inmemory, kafka, nats
-  hosts: []
-  topic: walstreamer
+  type: nats
+  hosts:
+    - nats://localhost:4222
+  topic: walstreamer.changes
   username: ""
   password: ""
 
 lsn:
-  type: file # file, postgres
-  path: ./data/lsn
+  type: file
+  path: /tmp/walstreamer.lsn
   persist_interval: 5s
 
 log:
-  level: info # debug, info, warn, error
-  format: console # json, console
+  level: info
+  format: console
+
+storage:
+  type: file
+  path: /tmp/walstreamer

@@ -5,7 +5,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"repo.nusatek.id/sugeng/walstreamer/model"
 )
@@ -24,6 +28,10 @@ const (
 	OIDTimestamp   = 1114
 	OIDTimestamptz = 1184
 	OIDDate        = 1082
+	OIDInt2        = 21
+	OIDVarchar     = 1043
+	OIDBpchar      = 1042
+	OIDByteArray   = 17
 )
 
 type relationInfo struct {
@@ -91,16 +99,19 @@ func (d *PgOutputDecoder) parseRelation(data []byte) (*model.Message, error) {
 		offset += len(columnName) + 1
 		dataTypeID := binary.BigEndian.Uint32(data[offset : offset+4])
 		offset += 4
-		typeMod := binary.BigEndian.Uint32(data[offset : offset+4])
+		//typeMod := binary.BigEndian.Uint32(data[offset : offset+4])
 		offset += 4
 
 		column := model.ColumnDefinition{
-			Name:     columnName,
-			TypeOid:  dataTypeID,
-			Type:     d.getTypeName(dataTypeID),
+			Name: columnName,
+			Type: model.DataType{
+				Name:      d.getTypeName(dataTypeID),
+				TypeOid:   dataTypeID,
+				ArrayType: false, // TODO: Detect array types
+			},
 			Order:    i,
-			Optional: typeMod == 0,
-			IsKey:    flags&1 != 0,
+			Optional: true, // TODO: Get from pg_attribute
+			IsKey:    (flags&1 != 0),
 		}
 		columns = append(columns, column)
 	}
@@ -112,12 +123,16 @@ func (d *PgOutputDecoder) parseRelation(data []byte) (*model.Message, error) {
 	}
 
 	return &model.Message{
+		ID:        uuid.New().String(),
 		Operation: "RELATION",
 		Schema:    schemaName,
 		Table:     tableName,
-		Columns:   columns,
-		Timestamp: time.Now().UnixNano(),
-		Raw:       data,
+		Object: model.TableSchema{
+			Columns: columns,
+		},
+		LSN:       0,
+		Timestamp: time.Now(),
+		EventType: "DDL",
 	}, nil
 }
 
@@ -129,18 +144,22 @@ func (d *PgOutputDecoder) parseBegin(data []byte) (*model.Message, error) {
 	xid := binary.BigEndian.Uint32(data[17:21])
 
 	return &model.Message{
-		TransactionID: fmt.Sprintf("%d", xid),
+		ID:            uuid.New().String(),
 		Operation:     "BEGIN",
-		Timestamp:     time.Now().UnixNano(),
-		Raw:           data,
+		TransactionID: fmt.Sprintf("%d", xid),
+		LSN:           uint64(binary.BigEndian.Uint64(data[5:13])),
+		Timestamp:     time.Now(),
+		EventType:     "TRANSACTION",
 	}, nil
 }
 
 func (d *PgOutputDecoder) parseCommit(data []byte) (*model.Message, error) {
 	return &model.Message{
+		ID:        uuid.New().String(),
 		Operation: "COMMIT",
-		Timestamp: time.Now().UnixNano(),
-		Raw:       data,
+		LSN:       uint64(binary.BigEndian.Uint64(data[5:13])),
+		Timestamp: time.Now(),
+		EventType: "TRANSACTION",
 	}, nil
 }
 
@@ -166,13 +185,17 @@ func (d *PgOutputDecoder) parseInsert(data []byte) (*model.Message, error) {
 	}
 
 	return &model.Message{
+		ID:        uuid.New().String(),
 		Operation: "INSERT",
 		Schema:    relation.schema,
 		Table:     relation.table,
+		Object: model.TableSchema{
+			Columns: relation.columns,
+		},
 		After:     tupleData,
-		Columns:   relation.columns,
-		Timestamp: time.Now().UnixNano(),
-		Raw:       data,
+		LSN:       uint64(binary.BigEndian.Uint64(data[13:21])),
+		Timestamp: time.Now(),
+		EventType: "DML",
 	}, nil
 }
 
@@ -209,14 +232,18 @@ func (d *PgOutputDecoder) parseUpdate(data []byte) (*model.Message, error) {
 	}
 
 	return &model.Message{
+		ID:        uuid.New().String(),
 		Operation: "UPDATE",
 		Schema:    relation.schema,
 		Table:     relation.table,
+		Object: model.TableSchema{
+			Columns: relation.columns,
+		},
 		Before:    oldTuple,
 		After:     newTuple,
-		Columns:   relation.columns,
-		Timestamp: time.Now().UnixNano(),
-		Raw:       data,
+		LSN:       uint64(binary.BigEndian.Uint64(data[13:21])),
+		Timestamp: time.Now(),
+		EventType: "DML",
 	}, nil
 }
 
@@ -243,65 +270,109 @@ func (d *PgOutputDecoder) parseDelete(data []byte) (*model.Message, error) {
 	}
 
 	return &model.Message{
+		ID:        uuid.New().String(),
 		Operation: "DELETE",
 		Schema:    relation.schema,
 		Table:     relation.table,
+		Object: model.TableSchema{
+			Columns: relation.columns,
+		},
 		Before:    oldTuple,
-		Columns:   relation.columns,
-		Timestamp: time.Now().UnixNano(),
-		Raw:       data,
+		LSN:       uint64(binary.BigEndian.Uint64(data[13:21])),
+		Timestamp: time.Now(),
+		EventType: "DML",
 	}, nil
 }
 
-func (d *PgOutputDecoder) parseTupleData(data []byte, relationID uint32) (map[string]interface{}, error) {
+func (d *PgOutputDecoder) parseTupleData(data []byte, relationId uint32) (map[string]interface{}, error) {
 	if len(data) < 2 {
-		return nil, fmt.Errorf("invalid tuple data length: %d", len(data))
+		return nil, fmt.Errorf("tuple data too short")
 	}
 
-	relation, ok := d.relations[relationID]
+	// First byte is tuple type ('N' for new tuple, 'K' for key tuple, etc)
+	// Skip it if present
+	pos := 0
+	if data[0] == 'N' || data[0] == 'K' || data[0] == 'O' {
+		pos = 1
+	}
+
+	// Next 2 bytes are number of columns
+	if pos+2 > len(data) {
+		return nil, fmt.Errorf("tuple data truncated at column count")
+	}
+	numColumns := int(binary.BigEndian.Uint16(data[pos:]))
+	pos += 2
+
+	relation, ok := d.relations[relationId]
 	if !ok {
-		return nil, fmt.Errorf("relation with ID %d not found", relationID)
+		return nil, fmt.Errorf("relation %d not found", relationId)
 	}
 
-	numColumns := binary.BigEndian.Uint16(data[0:2])
-	offset := 2
+	// For debugging
+	fmt.Printf("Tuple data: %v\n", data[:min(len(data), 32)])
+	fmt.Printf("Relation ID: %d, Expected columns: %d, Got columns: %d\n", relationId, len(relation.columns), numColumns)
 
-	columns := make(map[string]interface{})
+	// Check if column count matches
+	if numColumns != len(relation.columns) {
+		return nil, fmt.Errorf("column count mismatch: got %d, expected %d (first 32 bytes: %v)",
+			numColumns, len(relation.columns), data[:min(len(data), 32)])
+	}
 
-	for i := 0; i < int(numColumns); i++ {
-		if len(data) < offset+1 {
-			return nil, fmt.Errorf("invalid tuple data: missing column type at offset %d", offset)
+	values := make(map[string]interface{})
+
+	for i := 0; i < numColumns; i++ {
+		if pos >= len(data) {
+			return nil, fmt.Errorf("unexpected end of tuple data at column %d", i)
 		}
 
-		colType := data[offset]
-		offset++
+		colType := data[pos]
+		pos++
+
+		var colData []byte
+		var err error
 
 		switch colType {
-		case 'n': // Null value
-			columns[relation.columns[i].Name] = nil
-		case 'u': // Unchanged TOASTed value
-			columns[relation.columns[i].Name] = nil
-		case 't': // Text formatted value
-			if len(data) < offset+4 {
-				return nil, fmt.Errorf("invalid tuple data: missing column length at offset %d", offset)
+		case 'n': // null
+			values[relation.columns[i].Name] = nil
+			continue
+		case 'u': // unchanged toast
+			// Skip unchanged toast value
+			continue
+		case 't': // text
+			if pos+4 > len(data) {
+				return nil, fmt.Errorf("insufficient data for text length at column %d", i)
 			}
-			colLen := binary.BigEndian.Uint32(data[offset : offset+4])
-			offset += 4
-			if len(data) < offset+int(colLen) {
-				return nil, fmt.Errorf("invalid tuple data: missing column value at offset %d", offset)
+			length := int(binary.BigEndian.Uint32(data[pos:]))
+			pos += 4
+			if pos+length > len(data) {
+				return nil, fmt.Errorf("insufficient data for text value at column %d", i)
 			}
-			value, err := d.parseValue(data[offset:offset+int(colLen)], relation.columns[i].TypeOid)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse column value: %w", err)
+			colData = data[pos : pos+length]
+			pos += length
+		case 'b': // binary
+			if pos+4 > len(data) {
+				return nil, fmt.Errorf("insufficient data for binary length at column %d", i)
 			}
-			columns[relation.columns[i].Name] = value
-			offset += int(colLen)
+			length := int(binary.BigEndian.Uint32(data[pos:]))
+			pos += 4
+			if pos+length > len(data) {
+				return nil, fmt.Errorf("insufficient data for binary value at column %d", i)
+			}
+			colData = data[pos : pos+length]
+			pos += length
 		default:
-			return nil, fmt.Errorf("invalid tuple data column type: %c", colType)
+			return nil, fmt.Errorf("invalid tuple data column type at column %d: %q (hex: %x)", i, colType, colType)
 		}
+
+		val, err := d.parseValue(colData, relation.columns[i].Type.TypeOid)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse column %s value: %w", relation.columns[i].Name, err)
+		}
+
+		values[relation.columns[i].Name] = val
 	}
 
-	return columns, nil
+	return values, nil
 }
 
 func (d *PgOutputDecoder) getTupleDataLength(data []byte) int {
@@ -309,27 +380,33 @@ func (d *PgOutputDecoder) getTupleDataLength(data []byte) int {
 		return 0
 	}
 
-	numColumns := binary.BigEndian.Uint16(data[0:2])
-	offset := 2
+	numColumns := int(binary.BigEndian.Uint16(data))
+	pos := 2
 
-	for i := 0; i < int(numColumns); i++ {
-		if len(data) < offset+1 {
-			return offset
+	for i := 0; i < numColumns; i++ {
+		if pos >= len(data) {
+			return pos
 		}
 
-		colType := data[offset]
-		offset++
+		colType := data[pos]
+		pos++
 
 		if colType == 't' {
-			if len(data) < offset+4 {
-				return offset
+			if pos+4 > len(data) {
+				return pos
 			}
-			colLen := binary.BigEndian.Uint32(data[offset : offset+4])
-			offset += 4 + int(colLen)
+			length := int(binary.BigEndian.Uint32(data[pos:]))
+			pos += 4 + length
+		} else if colType == 'b' {
+			if pos+4 > len(data) {
+				return pos
+			}
+			length := int(binary.BigEndian.Uint32(data[pos:]))
+			pos += 4 + length
 		}
 	}
 
-	return offset
+	return pos
 }
 
 func (d *PgOutputDecoder) parseValue(data []byte, oid uint32) (interface{}, error) {
@@ -337,35 +414,101 @@ func (d *PgOutputDecoder) parseValue(data []byte, oid uint32) (interface{}, erro
 		return nil, nil
 	}
 
-	switch oid {
-	case OIDJson, OIDJsonb:
-		var v interface{}
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	// Try parsing as text first for short values
+	if len(data) < 4 {
+		strVal := string(data)
+		switch oid {
+		case OIDInt2, OIDInt4, OIDInt8:
+			var i int64
+			_, err := fmt.Sscanf(strVal, "%d", &i)
+			if err == nil {
+				return i, nil
+			}
+		case OIDFloat4, OIDFloat8:
+			var f float64
+			_, err := fmt.Sscanf(strVal, "%f", &f)
+			if err == nil {
+				return f, nil
+			}
+		case OIDBoolean:
+			switch strings.ToLower(strVal) {
+			case "t", "true", "1":
+				return true, nil
+			case "f", "false", "0":
+				return false, nil
+			}
 		}
-		return v, nil
-	case OIDBoolean:
-		return data[0] == 1, nil
-	case OIDInt8:
-		return binary.BigEndian.Uint64(data), nil
+	}
+
+	// If text parsing fails or data is long enough, try binary format
+	switch oid {
+	case OIDText, OIDVarchar, OIDBpchar:
+		return string(data), nil
+
+	case OIDInt2:
+		if len(data) < 2 {
+			return nil, fmt.Errorf("insufficient data for int2: got %d bytes, need 2", len(data))
+		}
+		return int16(binary.BigEndian.Uint16(data)), nil
+
 	case OIDInt4:
-		return binary.BigEndian.Uint32(data), nil
+		if len(data) < 4 {
+			return nil, fmt.Errorf("insufficient data for int4: got %d bytes, need 4", len(data))
+		}
+		return int32(binary.BigEndian.Uint32(data)), nil
+
+	case OIDInt8:
+		if len(data) < 8 {
+			return nil, fmt.Errorf("insufficient data for int8: got %d bytes, need 8", len(data))
+		}
+		return int64(binary.BigEndian.Uint64(data)), nil
+
 	case OIDFloat4:
+		if len(data) < 4 {
+			return nil, fmt.Errorf("insufficient data for float4: got %d bytes, need 4", len(data))
+		}
 		bits := binary.BigEndian.Uint32(data)
-		return float32(bits), nil
+		return math.Float32frombits(bits), nil
+
 	case OIDFloat8:
+		if len(data) < 8 {
+			return nil, fmt.Errorf("insufficient data for float8: got %d bytes, need 8", len(data))
+		}
 		bits := binary.BigEndian.Uint64(data)
-		return float64(bits), nil
+		return math.Float64frombits(bits), nil
+
+	case OIDBoolean:
+		if len(data) < 1 {
+			return nil, fmt.Errorf("insufficient data for bool: got %d bytes, need 1", len(data))
+		}
+		return data[0] != 0, nil
+
+	case OIDDate:
+		if len(data) < 4 {
+			return nil, fmt.Errorf("insufficient data for date: got %d bytes, need 4", len(data))
+		}
+		days := int32(binary.BigEndian.Uint32(data))
+		return time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(days)), nil
+
 	case OIDTimestamp, OIDTimestamptz:
+		if len(data) < 8 {
+			return nil, fmt.Errorf("insufficient data for timestamp: got %d bytes, need 8", len(data))
+		}
 		microsecs := binary.BigEndian.Uint64(data)
 		return time.Unix(0, int64(microsecs)*1000).Format(time.RFC3339Nano), nil
-	case OIDDate:
-		days := binary.BigEndian.Uint32(data)
-		return time.Unix(int64(days*86400), 0).Format("2006-01-02"), nil
-	case OIDText:
-		return string(data), nil
+
+	case OIDJson, OIDJsonb:
+		var val interface{}
+		if err := json.Unmarshal(data, &val); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON: %w", err)
+		}
+		return val, nil
+
+	case OIDByteArray:
+		return data, nil
+
 	default:
-		// For unknown types, return as string
+		// For unknown or array types, return as string
 		return string(data), nil
 	}
 }
@@ -394,6 +537,14 @@ func (d *PgOutputDecoder) getTypeName(oid uint32) string {
 		return "date"
 	case OIDText:
 		return "text"
+	case OIDInt2:
+		return "smallint"
+	case OIDVarchar:
+		return "varchar"
+	case OIDBpchar:
+		return "bpchar"
+	case OIDByteArray:
+		return "bytea"
 	default:
 		return fmt.Sprintf("unknown_%d", oid)
 	}
@@ -429,12 +580,16 @@ func (d *PgOutputDecoder) parseTruncate(data []byte) (*model.Message, error) {
 	}
 
 	return &model.Message{
+		ID:        uuid.New().String(),
 		Operation: "TRUNCATE",
 		Schema:    relation.schema,
 		Table:     relation.table,
-		Columns:   relation.columns,
-		Timestamp: time.Now().UnixNano(),
-		Raw:       data,
+		Object: model.TableSchema{
+			Columns: relation.columns,
+		},
+		LSN:       uint64(binary.BigEndian.Uint64(data[13:21])),
+		Timestamp: time.Now(),
+		EventType: "DDL",
 	}, nil
 }
 
@@ -442,4 +597,11 @@ func NewPgOutputDecoder() *PgOutputDecoder {
 	return &PgOutputDecoder{
 		relations: make(map[uint32]relationInfo),
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

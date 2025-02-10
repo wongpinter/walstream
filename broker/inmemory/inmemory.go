@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/rs/zerolog"
+
 	"repo.nusatek.id/sugeng/walstreamer/model"
 )
 
@@ -12,12 +14,14 @@ import (
 type InMemoryBroker struct {
 	messages []*model.Message
 	mu       sync.RWMutex
+	logger   *zerolog.Logger
 }
 
 // NewInMemoryBroker creates a new InMemoryBroker
-func NewInMemoryBroker() *InMemoryBroker {
+func NewInMemoryBroker(l *zerolog.Logger) *InMemoryBroker {
 	return &InMemoryBroker{
 		messages: make([]*model.Message, 0),
+		logger:   l,
 	}
 }
 
@@ -41,5 +45,6 @@ func (b *InMemoryBroker) GetMessages() []*model.Message {
 	defer b.mu.RUnlock()
 	messages := make([]*model.Message, len(b.messages))
 	copy(messages, b.messages)
+	b.logger.Info().Any("messages", messages).Msg("messages")
 	return messages
 }
