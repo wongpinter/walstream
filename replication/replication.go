@@ -76,6 +76,11 @@ func (m *Manager) Close(ctx context.Context) error {
 // If the publication exists, it will be updated with the current table configuration.
 // If the replication slot exists, it will be reused.
 func (m *Manager) Setup(ctx context.Context) error {
+	// Cleanup any existing resources
+	// if err := m.Cleanup(ctx); err != nil {
+	// 	return fmt.Errorf("failed to cleanup existing resources: %w", err)
+	// }
+
 	if err := m.createPublication(ctx); err != nil {
 		return fmt.Errorf("failed to create publication: %w", err)
 	}
@@ -215,6 +220,105 @@ func (m *Manager) createReplicationSlot(ctx context.Context) error {
 	_, err = m.conn.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to create replication slot: %w", err)
+	}
+
+	return nil
+}
+
+// CleanupPublication drops the existing publication if it exists
+func (m *Manager) CleanupPublication(ctx context.Context) error {
+	// Check if publication exists
+	var exists bool
+	err := m.conn.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = $1)",
+		m.config.PublicationName,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check publication existence: %w", err)
+	}
+
+	if exists {
+		// Fix: Changed $1 to %s for proper SQL string formatting
+		sql := fmt.Sprintf("DROP PUBLICATION IF EXISTS %s",
+			pgx.Identifier{m.config.PublicationName}.Sanitize())
+		_, err := m.conn.Exec(ctx, sql)
+		if err != nil {
+			return fmt.Errorf("failed to drop publication %s: %w", m.config.PublicationName, err)
+		}
+	}
+	return nil
+}
+
+// CleanupReplicationSlot drops the existing replication slot if it exists
+func (m *Manager) CleanupReplicationSlot(ctx context.Context) error {
+	// Check if slot exists
+	var exists bool
+	err := m.conn.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1 AND slot_type = 'logical')",
+		m.config.SlotName,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check replication slot existence: %w", err)
+	}
+
+	if exists {
+		// First check if slot is active
+		var active bool
+		err := m.conn.QueryRow(ctx,
+			"SELECT active FROM pg_replication_slots WHERE slot_name = $1",
+			m.config.SlotName,
+		).Scan(&active)
+		if err != nil {
+			return fmt.Errorf("failed to check if replication slot is active: %w", err)
+		}
+
+		if active {
+			// If slot is active, try to terminate any existing connections
+			_, err := m.conn.Exec(ctx,
+				"SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = $1 AND active_pid IS NOT NULL",
+				m.config.SlotName,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to terminate active connections for slot %s: %w", m.config.SlotName, err)
+			}
+		}
+
+		_, err = m.conn.Exec(ctx,
+			"SELECT pg_drop_replication_slot($1)",
+			m.config.SlotName,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to drop replication slot %s: %w", m.config.SlotName, err)
+		}
+	}
+	return nil
+}
+
+// Cleanup drops both the publication and replication slot if they exist.
+// It will attempt to clean up both resources even if one fails, collecting all errors.
+func (m *Manager) Cleanup(ctx context.Context) error {
+	var errs []error
+
+	// Cleanup publication
+	if err := m.CleanupPublication(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("failed to cleanup publication: %w", err))
+	}
+
+	// Cleanup replication slot
+	if err := m.CleanupReplicationSlot(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("failed to cleanup replication slot: %w", err))
+	}
+
+	// If we have any errors, combine them
+	if len(errs) > 0 {
+		var errStr strings.Builder
+		for i, err := range errs {
+			if i > 0 {
+				errStr.WriteString("; ")
+			}
+			errStr.WriteString(err.Error())
+		}
+		return fmt.Errorf("cleanup errors: %s", errStr.String())
 	}
 
 	return nil
