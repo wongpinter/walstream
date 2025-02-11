@@ -21,6 +21,28 @@ type Config struct {
 	Storage     StorageConfig     `koanf:"storage"`
 }
 
+func (cfg Config) GetIncludedTables() []string {
+	includedTables := make([]string, 0)
+	for _, table := range cfg.Replication.Tables {
+		if !strings.HasPrefix(table.Name, "!") && table.Name != "" {
+			includedTables = append(includedTables, table.Name)
+		}
+	}
+
+	return includedTables
+}
+
+func (cfg Config) GetExcludedTables() []string {
+	excludedTables := make([]string, 0)
+	for _, table := range cfg.Replication.Tables {
+		if strings.HasPrefix(table.Name, "!") {
+			excludedTables = append(excludedTables, strings.TrimPrefix(table.Name, "!"))
+		}
+	}
+
+	return excludedTables
+}
+
 // DatabaseConfig holds PostgreSQL connection configuration
 type DatabaseConfig struct {
 	Schema   string `koanf:"schema"`

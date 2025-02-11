@@ -28,7 +28,11 @@ type Pipeline struct {
 func NewPipeline(cfg *config.Config, logger *logging.Logger) (*Pipeline, error) {
 	ctx := context.Background()
 
-	creds := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	creds := cfg.Broker.PubSub.CredentialsFile
+	if creds == "" {
+		creds = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	}
+
 	if creds == "" {
 		return nil, fmt.Errorf("GOOGLE_APPLICATION_CREDENTIALS environment variable is required")
 	}
