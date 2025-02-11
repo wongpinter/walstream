@@ -18,12 +18,12 @@ import (
 type InitialSyncer struct {
 	cfg    *config.Config
 	broker broker.Broker
-	logger zerolog.Logger
+	logger *zerolog.Logger
 	conn   *pgx.Conn
 }
 
 // NewInitialSyncer creates a new InitialSyncer
-func NewInitialSyncer(cfg *config.Config, broker broker.Broker, logger zerolog.Logger) *InitialSyncer {
+func NewInitialSyncer(cfg *config.Config, broker broker.Broker, logger *zerolog.Logger) *InitialSyncer {
 	return &InitialSyncer{
 		cfg:    cfg,
 		broker: broker,

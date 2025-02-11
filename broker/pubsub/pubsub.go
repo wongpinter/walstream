@@ -27,14 +27,14 @@ type Config struct {
 	// AutoCreateTopic determines whether to create topics automatically
 	AutoCreateTopic bool
 	// Logger is the zerolog logger instance
-	Logger zerolog.Logger
+	Logger *zerolog.Logger
 }
 
 // Broker implements the broker.Broker interface for Google Cloud Pub/Sub
 type Broker struct {
 	client       *pubsub.Client
 	topics       map[string]*pubsub.Topic
-	logger       zerolog.Logger
+	logger       *zerolog.Logger
 	metrics      broker.BrokerMetrics
 	validators   []broker.MessageValidator
 	transformers []broker.MessageTransformer

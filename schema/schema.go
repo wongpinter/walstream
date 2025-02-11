@@ -14,12 +14,12 @@ import (
 // Fetcher is responsible for fetching and caching table schemas
 type Fetcher struct {
 	conn   *pgx.Conn
-	logger zerolog.Logger
+	logger *zerolog.Logger
 	cache  map[string]*model.TableSchema // key: "schema.table"
 }
 
 // NewFetcher creates a new schema fetcher
-func NewFetcher(connString string, logger zerolog.Logger) *Fetcher {
+func NewFetcher(connString string, logger *zerolog.Logger) *Fetcher {
 	conn, err := pgx.Connect(context.Background(), connString)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to connect to database")

@@ -23,6 +23,7 @@ type Config struct {
 
 // DatabaseConfig holds PostgreSQL connection configuration
 type DatabaseConfig struct {
+	Schema   string `koanf:"schema"`
 	Host     string `koanf:"host"`
 	Port     int    `koanf:"port"`
 	User     string `koanf:"user"`
@@ -86,16 +87,18 @@ func (c *ReplicationConfig) Validate() error {
 
 // BrokerConfig holds broker-related configuration
 type BrokerConfig struct {
-	Type     string   `koanf:"type"`     // Broker type (inmemory, nats, pubsub)
-	Hosts    []string `koanf:"hosts"`    // List of broker hosts
-	Topic    string   `koanf:"topic"`    // Default topic/subject name
-	Username string   `koanf:"username"` // Optional username for authentication
-	Password string   `koanf:"password"` // Optional password for authentication
-	PubSub   struct {
-		ProjectID       string `koanf:"project_id"`       // Google Cloud project ID
-		TopicPrefix    string `koanf:"topic_prefix"`     // Prefix for auto-generated topics (e.g., "walstreamer-")
-		CredentialsFile string `koanf:"credentials_file"` // Path to JSON credentials file
+	Type          string   `koanf:"type"`           // Broker type (inmemory, nats, pubsub)
+	Hosts         []string `koanf:"hosts"`          // List of broker hosts
+	Topic         string   `koanf:"topic"`          // Default topic/subject name
+	Username      string   `koanf:"username"`       // Optional username for authentication
+	Password      string   `koanf:"password"`       // Optional password for authentication
+	WriteMetadata bool     `koanf:"write_metadata"` // Optional flag to write metadata
+	PubSub        struct {
+		ProjectID       string `koanf:"project_id"`        // Google Cloud project ID
+		TopicPrefix     string `koanf:"topic_prefix"`      // Prefix for auto-generated topics (e.g., "walstreamer-")
+		CredentialsFile string `koanf:"credentials_file"`  // Path to JSON credentials file
 		AutoCreateTopic bool   `koanf:"auto_create_topic"` // Whether to automatically create topics
+		Location        string `koanf:"location"`          // Location for BigQuery tables
 	} `koanf:"pubsub"`
 }
 

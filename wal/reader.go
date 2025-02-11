@@ -23,7 +23,7 @@ import (
 // Reader is responsible for reading and processing WAL entries
 type Reader struct {
 	conn            *pgconn.PgConn
-	logger          zerolog.Logger
+	logger          *zerolog.Logger
 	clientXLogPos   pglogrepl.LSN
 	standbyTimeout  time.Duration
 	publicationName string
@@ -43,7 +43,7 @@ type Config struct {
 	PublicationName string
 	SlotName        string
 	StandbyTimeout  time.Duration
-	Logger          zerolog.Logger
+	Logger          *zerolog.Logger
 	LSNStorage      lsn.Storage
 	// Maximum number of reconnection attempts, 0 means unlimited
 	MaxReconnectAttempts int
