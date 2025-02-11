@@ -59,6 +59,7 @@ type TableConfig struct {
 	Name       string   `koanf:"name"`       // Table name in format schema.table
 	Operations []string `koanf:"operations"` // List of operations to capture
 	Topic      string   `koanf:"topic"`      // Optional topic override for this table
+	Columns    []string `koanf:"columns"`    // List of columns to capture
 }
 
 // ReplicationConfig holds configuration for WAL replication

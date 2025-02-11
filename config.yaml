@@ -1,5 +1,6 @@
 # Database configuration
 database:
+  schema: public
   host: Cosmic-Echo.local # PostgreSQL server hostname
   port: 5432 # PostgreSQL server port
   user: guest # PostgreSQL username
@@ -23,6 +24,7 @@ replication:
     - name: inventory
       operations: ["INSERT", "UPDATE", "DELETE"]
       topic: inventory # Topic for this table's changes
+      columns: ["id", "product_name", "unit_price"]
     - name: users
       operations: ["INSERT", "UPDATE", "DELETE"]
       topic: users # Topic for this table's changes
@@ -57,6 +59,7 @@ broker:
   topic: walstreamer.changes # Default topic name (used for tables without specific topic)
   username: "" # Optional NATS username
   password: "" # Optional NATS password
+  write_metadata: false # Whether to write metadata to bigquery
 
   # Google Cloud Pub/Sub specific configuration
   # Required when type is "pubsub"
@@ -65,6 +68,7 @@ broker:
     topic_prefix: "walstreamer-" # Prefix for auto-generated topics (e.g., walstreamer-inventory)
     credentials_file: "/path/to/credentials.json" # Path to Google Cloud service account JSON key file
     auto_create_topic: true # Automatically create topics if they don't exist
+    location: "asia-southeast1" # Location for BigQuery tables
 
 # LSN (Log Sequence Number) persistence configuration
 lsn:

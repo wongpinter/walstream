@@ -98,10 +98,10 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 	}
 
 	// Transform message
-	transformed := message
+	transformed := interface{}(message)
 	for _, transformer := range b.transformers {
 		var err error
-		transformed, err = transformer(transformed)
+		transformed, err = transformer(message)
 		if err != nil {
 			b.metrics.MessagesFailed++
 			b.metrics.LastError = err
@@ -109,6 +109,12 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 			return fmt.Errorf("message transformation failed: %w", err)
 		}
 	}
+
+	b.logger.Debug().
+		Str("operation", message.Operation).
+		Str("table", message.Table).
+		Uint64("lsn", message.LSN).
+		Msg("publishing message to NATS")
 
 	// Convert message to JSON
 	data, err := json.Marshal(transformed)
@@ -118,12 +124,6 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 		b.metrics.LastErrorTime = time.Now()
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
-
-	b.logger.Debug().
-		Str("operation", message.Operation).
-		Str("table", message.Table).
-		Uint64("lsn", message.LSN).
-		Msg("publishing message to NATS")
 
 	// Publish with JetStream
 	_, err = b.js.Publish(b.subject, data)
