@@ -10,14 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
-
 	"repo.nusatek.id/sugeng/walstreamer/broker"
 	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
 	"repo.nusatek.id/sugeng/walstreamer/broker/nats"
 	"repo.nusatek.id/sugeng/walstreamer/broker/pubsub"
 	"repo.nusatek.id/sugeng/walstreamer/config"
+	"repo.nusatek.id/sugeng/walstreamer/logging"
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
 	"repo.nusatek.id/sugeng/walstreamer/model"
 	"repo.nusatek.id/sugeng/walstreamer/replication"
@@ -43,15 +41,14 @@ func main() {
 	}
 
 	// Configure logging
-	level, err := zerolog.ParseLevel(cfg.Log.Level)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid log level: %v\n", err)
-		os.Exit(1)
+	loggerConfig := logging.Config{
+		Level:  logging.Level(cfg.Log.Level),
+		Format: cfg.Log.Format,
 	}
-	zerolog.SetGlobalLevel(level)
-
-	if cfg.Log.Format == "console" {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	logger, err := logging.New(loggerConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Initialize broker based on configuration
@@ -72,13 +69,14 @@ func main() {
 		natsConfig := nats.Config{
 			URL:      cfg.Broker.Hosts[0], // Use first host for now
 			Subject:  cfg.Broker.Topic,
-			Logger:   log.Logger,
+			Logger:   logger.Logger,
 			Username: cfg.Broker.Username,
 			Password: cfg.Broker.Password,
 		}
 		natsBroker, err := nats.NewBroker(natsConfig)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to create NATS broker")
+			logger.Error().Err(err).Msg("Failed to create NATS broker")
+			os.Exit(1)
 		}
 		messageBroker = natsBroker
 	case "pubsub":
@@ -87,22 +85,23 @@ func main() {
 			TopicPrefix:     cfg.Broker.PubSub.TopicPrefix,
 			CredentialsFile: cfg.Broker.PubSub.CredentialsFile,
 			AutoCreateTopic: cfg.Broker.PubSub.AutoCreateTopic,
-			Logger:          log.Logger,
+			Logger:          logger.Logger,
 		}
 		pubsubBroker, err := pubsub.NewBroker(pubsubConfig)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to create Pub/Sub broker")
+			logger.Error().Err(err).Msg("Failed to create Pub/Sub broker")
+			os.Exit(1)
 		}
 		messageBroker = pubsubBroker
 	default:
 		messageBroker = inmemory.NewInMemoryBroker(brokerConfig)
-		log.Info().Str("type", cfg.Broker.Type).Msg("Using in-memory broker")
+		logger.Info().Str("type", cfg.Broker.Type).Msg("Using in-memory broker")
 	}
 
 	// Create LSN storage
 	storage, err := lsn.NewFileStorage(cfg.LSN.Path, time.Duration(cfg.LSN.PersistInterval)*time.Second)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to create LSN storage")
+		logger.Fatal().Err(err).Msg("Failed to create LSN storage")
 	}
 	defer storage.Close()
 
@@ -125,33 +124,33 @@ func main() {
 
 	replManager := replication.NewManager(replConfig)
 	if err := replManager.Connect(context.Background(), cfg.Database.GetDSN()); err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect replication manager")
+		logger.Fatal().Err(err).Msg("Failed to connect replication manager")
 	}
 	defer replManager.Close(context.Background())
 
 	// Setup replication first
 	if err := replManager.Setup(context.Background()); err != nil {
-		log.Fatal().Err(err).Msg("Failed to setup replication")
+		logger.Fatal().Err(err).Msg("Failed to setup replication")
 	}
 
 	// Check if LSN file exists and handle initial sync
 	if cfg.Replication.InitialSync {
 		lsnExists, err := storage.Exists()
 		if err != nil {
-			log.Fatal().Err(err).Msg("failed to check LSN file")
+			logger.Fatal().Err(err).Msg("failed to check LSN file")
 		}
 
 		if !lsnExists {
-			log.Info().Msg("LSN file not found, starting initial sync")
-			syncer := sync.NewInitialSyncer(cfg, messageBroker, log.Logger)
+			logger.Info().Msg("LSN file not found, starting initial sync")
+			syncer := sync.NewInitialSyncer(cfg, messageBroker, logger.Logger)
 			if err := syncer.Start(context.Background()); err != nil {
-				log.Fatal().Err(err).Msg("failed to perform initial sync")
+				logger.Fatal().Err(err).Msg("failed to perform initial sync")
 			}
 			// Set initial LSN after sync completes
 			if err := storage.Set(cfg.Replication.PublicationName, 0); err != nil {
-				log.Fatal().Err(err).Msg("failed to set initial LSN")
+				logger.Fatal().Err(err).Msg("failed to set initial LSN")
 			}
-			log.Info().Msg("initial sync completed")
+			logger.Info().Msg("initial sync completed")
 		}
 	}
 
@@ -161,7 +160,7 @@ func main() {
 		PublicationName:       cfg.Replication.PublicationName,
 		SlotName:              cfg.Replication.SlotName,
 		StandbyTimeout:        time.Duration(cfg.Replication.StandbyTimeout) * time.Second,
-		Logger:                log.Logger,
+		Logger:                logger.Logger,
 		LSNStorage:            storage,
 		MaxReconnectAttempts:  cfg.Replication.Reconnect.MaxAttempts,
 		ReconnectInitialDelay: time.Duration(cfg.Replication.Reconnect.InitialDelay) * time.Second,
@@ -173,19 +172,19 @@ func main() {
 		// Get table name
 		tableFullName := msg.Table
 		if tableFullName == "" {
-			log.Debug().Msg("skipping message without table name")
+			logger.Debug().Msg("skipping message without table name")
 			return nil
 		}
 
 		// Log table information
-		log.Debug().
+		logger.Debug().
 			Str("table", tableFullName).
 			Strs("patterns", getTableNames(cfg.Replication.Tables)).
 			Msg("Checking table patterns")
 
 		// Check if table is allowed
 		if !isTableAllowed(cfg, tableFullName) {
-			log.Debug().
+			logger.Debug().
 				Str("table", tableFullName).
 				Msg("Table not in configured list")
 			return nil
@@ -193,7 +192,7 @@ func main() {
 
 		// Get operations for the table
 		operations := getTableOperations(cfg, tableFullName)
-		log.Debug().
+		logger.Debug().
 			Str("table", tableFullName).
 			Strs("operations", operations).
 			Msg("Table operations")
@@ -201,7 +200,7 @@ func main() {
 		// Get topic for the table if specified
 		topic := getTableTopic(cfg, tableFullName)
 		if topic != "" {
-			log.Debug().
+			logger.Debug().
 				Str("table", tableFullName).
 				Str("topic", topic).
 				Msg("Using custom topic for table")
@@ -216,7 +215,7 @@ func main() {
 			}
 		}
 		if !operationAllowed {
-			log.Debug().
+			logger.Debug().
 				Str("operation", msg.Operation).
 				Str("table", tableFullName).
 				Strs("allowed_ops", operations).
@@ -225,7 +224,7 @@ func main() {
 		}
 
 		// Print message details for debugging
-		log.Debug().
+		logger.Debug().
 			Str("operation", msg.Operation).
 			Str("schema", msg.Schema).
 			Str("table", msg.Table).
@@ -242,7 +241,7 @@ func main() {
 
 		// Print broker metrics for debugging
 		metrics := messageBroker.Metrics()
-		log.Info().
+		logger.Info().
 			Int64("messages_published", metrics.MessagesPublished).
 			Int64("messages_failed", metrics.MessagesFailed).
 			Int("buffer_size", metrics.BufferSize).
@@ -254,7 +253,7 @@ func main() {
 	// Create WAL reader
 	reader, err := wal.NewReader(walConfig, messageHandler)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to create WAL reader")
+		logger.Fatal().Err(err).Msg("Failed to create WAL reader")
 	}
 
 	// Create context with cancellation
@@ -266,13 +265,13 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigChan
-		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
+		logger.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
 		cancel()
 	}()
 
 	// Start WAL reader
 	if err := reader.Start(ctx); err != nil {
-		log.Fatal().Err(err).Msg("WAL reader failed")
+		logger.Fatal().Err(err).Msg("WAL reader failed")
 	}
 }
 

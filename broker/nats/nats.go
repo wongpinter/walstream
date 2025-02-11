@@ -22,7 +22,7 @@ type Config struct {
 	// Options are additional NATS connection options
 	Options []nats.Option
 	// Logger is the zerolog logger instance
-	Logger zerolog.Logger
+	Logger *zerolog.Logger
 	// Username is the username for NATS authentication
 	Username string
 	// Password is the password for NATS authentication
@@ -34,7 +34,7 @@ type Broker struct {
 	conn         *nats.Conn
 	js           nats.JetStreamContext
 	subject      string
-	logger       zerolog.Logger
+	logger       *zerolog.Logger
 	metrics      broker.BrokerMetrics
 	validators   []broker.MessageValidator
 	transformers []broker.MessageTransformer
