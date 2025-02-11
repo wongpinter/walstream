@@ -114,10 +114,10 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 	}
 
 	// Transform message
-	transformed := message
+	transformed := interface{}(message)
 	for _, transformer := range b.transformers {
 		var err error
-		transformed, err = transformer(transformed)
+		transformed, err = transformer(message)
 		if err != nil {
 			b.metrics.MessagesFailed++
 			b.metrics.LastError = err

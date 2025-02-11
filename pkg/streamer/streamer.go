@@ -168,6 +168,7 @@ func createBroker(cfg *config.Config, logger *zerolog.Logger) (broker.Broker, er
 
 func (s *Streamer) createWALReader(_ context.Context) (*wal.Reader, error) {
 	walConfig := wal.Config{
+		ConnString:            s.cfg.Database.GetReplicationDSN(),
 		PublicationName:       s.cfg.Replication.PublicationName,
 		SlotName:              s.cfg.Replication.SlotName,
 		StandbyTimeout:        time.Duration(s.cfg.Replication.StandbyTimeout) * time.Second,
@@ -219,6 +220,10 @@ func (s *Streamer) createMessageHandler() func(msg *model.Message) error {
 				Msg("Using custom topic for table")
 		}
 
+		// filter just publish columns defined from table
+		msg.Before = s.filterColumns(tableFullName, msg.Before)
+		msg.After = s.filterColumns(tableFullName, msg.After)
+
 		// Check if operation is allowed
 		operationAllowed := false
 		if len(operations) == 0 {
@@ -248,6 +253,10 @@ func (s *Streamer) createMessageHandler() func(msg *model.Message) error {
 			Interface("before", msg.Before).
 			Interface("after", msg.After).
 			Msg("Processing message")
+
+		s.messageBroker.AddTransformer(func(m *model.Message) (interface{}, error) {
+			return m.ToFormat(model.CompactFormat), nil
+		})
 
 		if err := s.messageBroker.Publish(context.Background(), msg); err != nil {
 			return fmt.Errorf("failed to publish message: %w", err)
@@ -290,4 +299,28 @@ func (s *Streamer) getTableTopic(tableName string) string {
 		}
 	}
 	return ""
+}
+
+func (s *Streamer) filterColumns(tableFullName string, columns map[string]interface{}) map[string]interface{} {
+	filteredColumns := make(map[string]interface{})
+	for column, value := range columns {
+		if s.isColumnAllowed(tableFullName, column) {
+			filteredColumns[column] = value
+		}
+	}
+	return filteredColumns
+}
+
+func (s *Streamer) isColumnAllowed(tableFullName string, column string) bool {
+	for _, table := range s.cfg.Replication.Tables {
+		if table.Name == tableFullName {
+			for _, allowedColumn := range table.Columns {
+				if column == allowedColumn {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
 }

@@ -17,7 +17,7 @@ var (
 type MessageValidator func(*model.Message) error
 
 // MessageTransformer is a function type that transforms a message before publishing
-type MessageTransformer func(*model.Message) (*model.Message, error)
+type MessageTransformer func(*model.Message) (interface{}, error)
 
 // RetryPolicy defines the retry behavior for failed publish attempts
 type RetryPolicy struct {
