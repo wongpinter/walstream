@@ -20,10 +20,10 @@ replication:
 
   # List of tables to replicate with their configurations
   tables:
-    - name: public.inventory
+    - name: inventory
       operations: ["INSERT", "UPDATE", "DELETE"]
       topic: inventory # Topic for this table's changes
-    - name: public.users
+    - name: users
       operations: ["INSERT", "UPDATE", "DELETE"]
       topic: users # Topic for this table's changes
 
