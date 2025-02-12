@@ -8,12 +8,16 @@ import (
 
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/logging"
+	"repo.nusatek.id/sugeng/walstreamer/pkg/cleanup"
 	"repo.nusatek.id/sugeng/walstreamer/replication"
 )
 
 func main() {
 	// Parse command line flags
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
+	dryrun := flag.Bool("dryrun", true, "Run cleanup in dry-run mode")
+	force := flag.Bool("force", false, "Force cleanup")
+
 	flag.Parse()
 
 	// Load configuration
@@ -34,6 +38,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	cleanUpPipeline, err := cleanup.NewPipeline(cfg, logger, cleanup.Options{
+		Force:  *force,
+		DryRun: *dryrun,
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to create cleanup pipeline")
+	}
+
+	if err := cleanUpPipeline.Run(context.Background()); err != nil {
+		logger.Fatal().Err(err).Msg("Failed to run cleanup pipeline")
+	}
+
 	// Create replication manager
 	replManager := replication.NewManager(replication.Config{
 		PublicationName: cfg.Replication.PublicationName,
@@ -52,8 +68,10 @@ func main() {
 		Str("slot", cfg.Replication.SlotName).
 		Msg("Cleaning up replication resources")
 
-	if err := replManager.Cleanup(context.Background()); err != nil {
-		logger.Fatal().Err(err).Msg("Failed to cleanup resources")
+	if *dryrun {
+		if err := replManager.Cleanup(context.Background()); err != nil {
+			logger.Fatal().Err(err).Msg("Failed to cleanup resources")
+		}
 	}
 
 	logger.Info().Msg("Successfully cleaned up replication resources")
