@@ -87,7 +87,7 @@ func (p *Pipeline) RunPipeline(ctx context.Context, configName string) error {
 	p.logger.Info().Msg("Creating Pub/Sub topics...")
 	for _, table := range tables {
 		topicID := FormatTopicID(p.config, table.Name)
-		if err := p.topicManager.CreateTopic(ctx, topicID, true); err != nil {
+		if err := p.topicManager.CreateTopic(ctx, topicID, false); err != nil {
 			return fmt.Errorf("failed to create topic %s: %w", topicID, err)
 		}
 	}

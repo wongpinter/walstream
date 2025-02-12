@@ -11,6 +11,7 @@ import (
 
 	"repo.nusatek.id/sugeng/walstreamer/broker"
 	"repo.nusatek.id/sugeng/walstreamer/config"
+	"repo.nusatek.id/sugeng/walstreamer/decoder/pgoutput"
 	"repo.nusatek.id/sugeng/walstreamer/model"
 )
 
@@ -132,7 +133,24 @@ func (s *InitialSyncer) syncTable(ctx context.Context, tableName string, columns
 		data := make(map[string]interface{})
 		fields := rows.FieldDescriptions()
 		for i, field := range fields {
-			data[string(field.Name)] = values[i]
+			switch field.DataTypeOID {
+			case pgoutput.OIDDate:
+				v, ok := values[i].(time.Time)
+				if ok {
+					data[string(field.Name)] = v.Format("2006-01-02")
+				} else {
+					data[string(field.Name)] = fmt.Sprintf("%v", values[i])
+				}
+			case pgoutput.OIDTimestamp:
+				v, ok := values[i].(time.Time)
+				if ok {
+					data[string(field.Name)] = v.Format("2006-01-02 15:04:05.999999")
+				} else {
+					data[string(field.Name)] = fmt.Sprintf("%v", values[i])
+				}
+			default:
+				data[string(field.Name)] = values[i]
+			}
 		}
 
 		batch = append(batch, data)
