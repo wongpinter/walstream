@@ -20,6 +20,12 @@ type SchemaConversionError struct {
 	Err   error
 }
 
+// SchemaTable represents a BigQuery table schema
+type SchemaTable struct {
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+}
+
 func (e *SchemaConversionError) Error() string {
 	return fmt.Sprintf("schema conversion error for table %s: %v", e.Table, e.Err)
 }
@@ -36,9 +42,9 @@ type Config struct {
 // Converter defines the interface for schema conversion operations.
 type Converter interface {
 	ListTables(ctx context.Context) ([]string, error)
-	ConvertAndStoreTables(ctx context.Context, tables []string) error
+	ConvertAndStoreTables(ctx context.Context, tables []SchemaTable) error
 	LoadSchema(table string) ([]AvroField, error)
-	ValidateSchema(ctx context.Context, table string) error
+	// ValidateSchema(ctx context.Context, table string) error
 	Close() error
 }
 
@@ -142,15 +148,15 @@ func (c *SchemaConverter) ListTables(ctx context.Context) ([]string, error) {
 }
 
 // ConvertAndStoreTables converts the specified tables to BigQuery schema and stores them as JSON files.
-func (c *SchemaConverter) ConvertAndStoreTables(ctx context.Context, tables []string) error {
+func (c *SchemaConverter) ConvertAndStoreTables(ctx context.Context, tables []SchemaTable) error {
 	for _, table := range tables {
-		schema, err := c.convertTable(ctx, table)
+		schema, err := c.convertTable(ctx, table.Name, table.Columns)
 		if err != nil {
-			return &SchemaConversionError{Table: table, Err: err}
+			return &SchemaConversionError{Table: table.Name, Err: err}
 		}
 
-		if err := c.storeSchema(table, schema); err != nil {
-			return &SchemaConversionError{Table: table, Err: err}
+		if err := c.storeSchema(table.Name, schema); err != nil {
+			return &SchemaConversionError{Table: table.Name, Err: err}
 		}
 	}
 	return nil
@@ -196,54 +202,54 @@ func (c *SchemaConverter) LoadSchema(table string) ([]AvroField, error) {
 }
 
 // ValidateSchema validates the schema conversion by comparing source and destination schemas.
-func (c *SchemaConverter) ValidateSchema(ctx context.Context, table string) error {
-	sourceSchema, err := c.convertTable(ctx, table)
-	if err != nil {
-		return fmt.Errorf("failed to get source schema: %w", err)
-	}
+// func (c *SchemaConverter) ValidateSchema(ctx context.Context, table string) error {
+// 	sourceSchema, err := c.convertTable(ctx, table)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get source schema: %w", err)
+// 	}
 
-	destSchema, err := c.LoadSchema(table)
-	if err != nil {
-		return fmt.Errorf("failed to load destination schema: %w", err)
-	}
+// 	destSchema, err := c.LoadSchema(table)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to load destination schema: %w", err)
+// 	}
 
-	if !c.compareSchemas(sourceSchema, destSchema) {
-		return fmt.Errorf("schema mismatch for table %s", table)
-	}
+// 	if !c.compareSchemas(sourceSchema, destSchema) {
+// 		return fmt.Errorf("schema mismatch for table %s", table)
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // compareSchemas compares two schemas for equality.
-func (c *SchemaConverter) compareSchemas(source, dest []AvroField) bool {
-	if len(source) != len(dest) {
-		return false
-	}
+// func (c *SchemaConverter) compareSchemas(source, dest []AvroField) bool {
+// 	if len(source) != len(dest) {
+// 		return false
+// 	}
 
-	for i, srcField := range source {
-		destField := dest[i]
-		if srcField.Name != destField.Name ||
-			srcField.Type != destField.Type ||
-			srcField.Mode != destField.Mode {
-			return false
-		}
+// 	for i, srcField := range source {
+// 		destField := dest[i]
+// 		if srcField.Name != destField.Name ||
+// 			srcField.Type != destField.Type ||
+// 			srcField.Mode != destField.Mode {
+// 			return false
+// 		}
 
-		if len(srcField.Fields) != len(destField.Fields) {
-			return false
-		}
+// 		if len(srcField.Fields) != len(destField.Fields) {
+// 			return false
+// 		}
 
-		if len(srcField.Fields) > 0 {
-			if !c.compareSchemas(srcField.Fields, destField.Fields) {
-				return false
-			}
-		}
-	}
+// 		if len(srcField.Fields) > 0 {
+// 			if !c.compareSchemas(srcField.Fields, destField.Fields) {
+// 				return false
+// 			}
+// 		}
+// 	}
 
-	return true
-}
+// 	return true
+// }
 
 // convertTable converts a single table to BigQuery schema.
-func (c *SchemaConverter) convertTable(ctx context.Context, tableName string) ([]AvroField, error) {
+func (c *SchemaConverter) convertTable(ctx context.Context, tableName string, columns []string) ([]AvroField, error) {
 	query := `
 		SELECT 
 			column_name, 
@@ -271,6 +277,7 @@ func (c *SchemaConverter) convertTable(ctx context.Context, tableName string) ([
 
 	var fields []AvroField
 	for rows.Next() {
+
 		var (
 			columnName       string
 			dataType         string
@@ -295,6 +302,10 @@ func (c *SchemaConverter) convertTable(ctx context.Context, tableName string) ([
 			return nil, fmt.Errorf("failed to scan column: %w", err)
 		}
 
+		if len(columns) > 0 && !stringInSlice(columnName, columns) {
+			continue
+		}
+
 		field := AvroField{
 			Name: columnName,
 		}
@@ -308,23 +319,15 @@ func (c *SchemaConverter) convertTable(ctx context.Context, tableName string) ([
 		}
 
 		switch strings.ToLower(dataType) {
-		case "smallint", "integer", "bigint":
+		case "numeric", "double precision":
+			field.Type = "NUMERIC"
+		case "integer", "smallint", "bigint", "int":
 			field.Type = "INTEGER"
-		case "numeric", "decimal":
-			field.Type = "RECORD"
-			field.Fields = []AvroField{
-				{
-					Mode: "NULLABLE",
-					Name: "scale",
-					Type: "INTEGER",
-				},
-				{
-					Mode: "NULLABLE",
-					Name: "value",
-					Type: "STRING",
-				},
+
+			if isSerial {
+				field.Type = "BIGINT"
 			}
-		case "real", "double precision":
+		case "real", "decimal":
 			field.Type = "FLOAT"
 		case "character varying", "text", "character":
 			field.Type = "STRING"
@@ -349,6 +352,13 @@ func (c *SchemaConverter) convertTable(ctx context.Context, tableName string) ([
 		return nil, fmt.Errorf("error iterating over rows: %w", err)
 	}
 
+	// Add _op field
+	fields = append(fields, AvroField{
+		Name: "__op",
+		Type: "STRING",
+		Mode: "NULLABLE",
+	})
+
 	// Add __deleted field for CDC
 	fields = append(fields, AvroField{
 		Name: "__deleted",
@@ -356,11 +366,21 @@ func (c *SchemaConverter) convertTable(ctx context.Context, tableName string) ([
 		Mode: "NULLABLE",
 	})
 
-	// fields = append(fields, AvroField{
-	// 	Name: "data",
-	// 	Type: "STRING",
-	// 	Mode: "NULLABLE",
-	// })
+	// add __timestamp field
+	fields = append(fields, AvroField{
+		Name: "__timestamp",
+		Type: "DATETIME",
+		Mode: "REQUIRED",
+	})
 
 	return fields, nil
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }

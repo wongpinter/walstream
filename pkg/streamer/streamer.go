@@ -255,7 +255,7 @@ func (s *Streamer) createMessageHandler() func(msg *model.Message) error {
 			Msg("Processing message")
 
 		s.messageBroker.AddTransformer(func(m *model.Message) (interface{}, error) {
-			return m.ToFormat(model.CompactFormat), nil
+			return m.ToFormat(model.RecordFormat), nil
 		})
 
 		if err := s.messageBroker.Publish(context.Background(), msg); err != nil {

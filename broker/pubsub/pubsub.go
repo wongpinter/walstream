@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/pubsub"
@@ -62,6 +61,12 @@ func NewBroker(cfg Config) (*Broker, error) {
 	}, nil
 }
 
+func (b *Broker) formatTopicID(table string) string {
+	return fmt.Sprintf("%s.%s",
+		b.config.TopicPrefix,
+		table)
+}
+
 // getTopicForTable gets or creates a Pub/Sub topic for the given table
 func (b *Broker) getTopicForTable(ctx context.Context, table string) (*pubsub.Topic, error) {
 	// Check if we already have the topic
@@ -70,7 +75,7 @@ func (b *Broker) getTopicForTable(ctx context.Context, table string) (*pubsub.To
 	}
 
 	// Generate topic ID from table name
-	topicID := b.config.TopicPrefix + strings.Replace(table, ".", "-", -1)
+	topicID := b.formatTopicID(table)
 
 	// Get or create topic
 	topic := b.client.Topic(topicID)
@@ -127,7 +132,7 @@ func (b *Broker) Publish(ctx context.Context, message *model.Message) error {
 	}
 
 	// Get topic for this table
-	topic, err := b.getTopicForTable(ctx, message.Table)
+	topic, err := b.getTopicForTable(ctx, fmt.Sprintf("%s.%s", message.Schema, message.Table))
 	if err != nil {
 		b.metrics.MessagesFailed++
 		b.metrics.LastError = err

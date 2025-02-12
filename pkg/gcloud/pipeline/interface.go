@@ -3,10 +3,10 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"repo.nusatek.id/sugeng/walstreamer/config"
+	"repo.nusatek.id/sugeng/walstreamer/pkg/gcloud/bigquery"
 )
 
 const (
@@ -17,7 +17,7 @@ const (
 // SchemaManagerInterface handles BigQuery schema operations
 type SchemaManagerInterface interface {
 	CreateDataset(ctx context.Context, datasetID string) error
-	CreateSchema(ctx context.Context, configName string, tables []string) error
+	CreateSchema(ctx context.Context, configName string, tables []bigquery.SchemaTable) error
 	Close() error
 }
 
@@ -41,17 +41,4 @@ func FormatTopicID(config *config.Config, table string) string {
 		config.Broker.PubSub.TopicPrefix,
 		config.Database.Schema,
 		table)
-}
-
-func (*Pipeline) cleanTableNames(tables []string) {
-	for i, table := range tables {
-		parts := strings.Split(table, ".")
-		if len(parts) == 2 {
-			table = parts[1]
-		}
-		if len(parts) == 1 {
-			table = parts[0]
-		}
-		tables[i] = table
-	}
 }

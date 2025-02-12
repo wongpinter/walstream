@@ -54,6 +54,8 @@ const (
 	RegularFormat MessageFormat = "regular"
 	// CompactFormat includes minimal fields for efficiency
 	CompactFormat MessageFormat = "compact"
+	// RecordFormat includes only data fields
+	RecordFormat MessageFormat = "record"
 )
 
 // Message represents a WAL message
@@ -92,6 +94,10 @@ type RegularMessage struct {
 	Timestamp time.Time              `json:"timestamp"`
 }
 
+type RecordMessage struct {
+	Data map[string]interface{} `json:"data"`
+}
+
 // CompactMessage represents a message with compact format
 type CompactMessage struct {
 	ID        string                 `json:"id"`
@@ -102,9 +108,32 @@ type CompactMessage struct {
 	After     map[string]interface{} `json:"after,omitempty"`
 }
 
+func buildMetaOperation(m *Message) map[string]interface{} {
+	switch m.Operation {
+	case "INSERT":
+		m.After["__op"] = "insert"
+		m.After["__timestamp"] = time.Now()
+		m.After["__deleted"] = "false"
+	case "UPDATE":
+		m.After["__op"] = "update"
+		m.After["__timestamp"] = time.Now()
+		m.After["__deleted"] = "false"
+	case "DELETE":
+		m.After["__op"] = "delete"
+		m.After["__timestamp"] = time.Now()
+		m.After["__deleted"] = "true"
+	default:
+		return nil
+	}
+
+	return m.After
+}
+
 // ToFormat converts the message to the specified format
 func (m *Message) ToFormat(format MessageFormat) interface{} {
 	switch format {
+	case RecordFormat:
+		return buildMetaOperation(m)
 	case CompleteFormat:
 		return m
 	case RegularFormat:
