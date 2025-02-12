@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -476,7 +477,13 @@ func (d *PgOutputDecoder) parseValue(data []byte, typeOid uint32) (interface{}, 
 				// Format with up to 10 decimal places, trim trailing zeros
 				s := fmt.Sprintf("%.10f", f)
 				s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
-				return s, nil
+
+				f, err = strconv.ParseFloat(s, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid numeric value: %s", strVal)
+				}
+
+				return f, nil
 			}
 		}
 

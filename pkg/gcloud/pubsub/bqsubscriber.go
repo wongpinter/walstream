@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -86,7 +87,16 @@ func WithCredentialsFile(ctx context.Context, credentialsFile string) BQSubscrib
 		if s.client != nil {
 			return // Don't override if client is already set
 		}
-		creds, err := google.FindDefaultCredentials(ctx,
+
+		// readfile credentials to byte
+		credsBytes, err := os.ReadFile(credentialsFile)
+		if err != nil {
+			// Log error but don't fail - will fall back to default credentials
+			s.logger.Error().Err(err).Msg("Failed to read credentials file")
+			return
+		}
+
+		creds, err := google.CredentialsFromJSON(ctx, credsBytes,
 			"https://www.googleapis.com/auth/cloud-platform",
 			"https://www.googleapis.com/auth/pubsub")
 		if err != nil {

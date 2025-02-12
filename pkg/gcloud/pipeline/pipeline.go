@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/logging"
+	"repo.nusatek.id/sugeng/walstreamer/pkg/gcloud/bigquery"
 )
 
 const (
@@ -63,11 +65,8 @@ func NewPipeline(cfg *config.Config, logger *logging.Logger) (*Pipeline, error) 
 }
 
 // RunPipeline executes the full pipeline setup
-func (p *Pipeline) RunPipeline(ctx context.Context, configName string, tables []string) error {
+func (p *Pipeline) RunPipeline(ctx context.Context, configName string) error {
 	p.logger.Info().Msg("Starting pipeline setup...")
-
-	// Clean table names
-	p.cleanTableNames(tables)
 
 	// Step 1: Create BigQuery dataset and schemas
 	p.logger.Info().Msg("Creating BigQuery dataset and schemas...")
@@ -78,6 +77,8 @@ func (p *Pipeline) RunPipeline(ctx context.Context, configName string, tables []
 		return fmt.Errorf("failed to create dataset: %w", err)
 	}
 
+	tables := p.createSchemaTables()
+
 	if err := p.schemaManager.CreateSchema(ctx, configName, tables); err != nil {
 		return fmt.Errorf("failed to create schemas: %w", err)
 	}
@@ -85,7 +86,7 @@ func (p *Pipeline) RunPipeline(ctx context.Context, configName string, tables []
 	// Step 2: Create Pub/Sub topics
 	p.logger.Info().Msg("Creating Pub/Sub topics...")
 	for _, table := range tables {
-		topicID := FormatTopicID(p.config, table)
+		topicID := FormatTopicID(p.config, table.Name)
 		if err := p.topicManager.CreateTopic(ctx, topicID, true); err != nil {
 			return fmt.Errorf("failed to create topic %s: %w", topicID, err)
 		}
@@ -102,7 +103,7 @@ func (p *Pipeline) RunPipeline(ctx context.Context, configName string, tables []
 }
 
 // createSubscriptionsConcurrently handles concurrent subscription creation
-func (p *Pipeline) createSubscriptionsConcurrently(ctx context.Context, configName string, tables []string) error {
+func (p *Pipeline) createSubscriptionsConcurrently(ctx context.Context, configName string, tables []bigquery.SchemaTable) error {
 	var wg sync.WaitGroup
 	errors := make(chan error, len(tables))
 	rateLimiter := time.Tick(rateLimitDuration)
@@ -116,7 +117,7 @@ func (p *Pipeline) createSubscriptionsConcurrently(ctx context.Context, configNa
 			if err := p.subManager.CreateSubscription(ctx, subscriptionID, []string{table}); err != nil {
 				errors <- fmt.Errorf("failed to create subscription %s: %w", subscriptionID, err)
 			}
-		}(table)
+		}(table.Name)
 	}
 
 	wg.Wait()
@@ -152,4 +153,19 @@ func (p *Pipeline) Close() error {
 	}
 
 	return nil
+}
+
+func (p *Pipeline) createSchemaTables() []bigquery.SchemaTable {
+	tables := make([]bigquery.SchemaTable, 0)
+
+	for _, tc := range p.config.Replication.Tables {
+		if !strings.HasPrefix(tc.Name, "!") && tc.Name != "" {
+			tables = append(tables, bigquery.SchemaTable{
+				Name:    tc.Name,
+				Columns: tc.Columns,
+			})
+		}
+	}
+
+	return tables
 }

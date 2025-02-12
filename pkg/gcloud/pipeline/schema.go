@@ -31,7 +31,7 @@ func newBigQuerySchemaManager(ctx context.Context, cfg *config.Config, logger *l
 }
 
 // CreateSchema implements SchemaManagerInterface
-func (sm *bigQuerySchemaManager) CreateSchema(ctx context.Context, configName string, tables []string) error {
+func (sm *bigQuerySchemaManager) CreateSchema(ctx context.Context, configName string, tables []bigquery.SchemaTable) error {
 	converter, err := bigquery.NewConverter(bigquery.Config{
 		Host:     sm.config.Database.Host,
 		Port:     sm.config.Database.Port,
@@ -52,13 +52,13 @@ func (sm *bigQuerySchemaManager) CreateSchema(ctx context.Context, configName st
 	var validationErrors []error
 
 	for _, table := range tables {
-		schema, err := converter.LoadSchema(table)
+		schema, err := converter.LoadSchema(table.Name)
 		if err != nil {
 			validationErrors = append(validationErrors, fmt.Errorf("table %s: %w", table, err))
 			continue
 		}
 
-		tableSchemas[table] = schema
+		tableSchemas[table.Name] = schema
 	}
 
 	if len(validationErrors) > 0 {

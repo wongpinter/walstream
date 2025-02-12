@@ -165,6 +165,10 @@ func convertAvroField(field AvroField) *bigquery.FieldSchema {
 // convertAvroFieldType converts AvroField type to BigQuery FieldType
 func convertAvroFieldType(avroType string) bigquery.FieldType {
 	switch avroType {
+	case "NUMERIC":
+		return bigquery.NumericFieldType
+	case "BIGINT":
+		return bigquery.BigNumericFieldType
 	case "INTEGER":
 		return bigquery.IntegerFieldType
 	case "FLOAT":

@@ -50,13 +50,13 @@ broker:
   # - inmemory: In-memory broker for testing
   # - nats: NATS message broker
   # - pubsub: Google Cloud Pub/Sub
-  type: nats
+  type: pubsub
 
   # NATS specific configuration
   # Required when type is "nats"
   hosts:
     - nats://Cosmic-Echo.local:4222
-  topic: walstreamer.changes # Default topic name (used for tables without specific topic)
+  topic: sugeng_poc # Default topic name (used for tables without specific topic)
   username: "" # Optional NATS username
   password: "" # Optional NATS password
   write_metadata: false # Whether to write metadata to bigquery
@@ -64,10 +64,10 @@ broker:
   # Google Cloud Pub/Sub specific configuration
   # Required when type is "pubsub"
   pubsub:
-    project_id: "your-project-id" # Google Cloud project ID
-    topic_prefix: "walstreamer-" # Prefix for auto-generated topics (e.g., walstreamer-inventory)
-    credentials_file: "/path/to/credentials.json" # Path to Google Cloud service account JSON key file
-    auto_create_topic: true # Automatically create topics if they don't exist
+    project_id: "proper-labs" # Google Cloud project ID
+    topic_prefix: "poc_local" # Prefix for auto-generated topics (e.g., walstreamer-inventory)
+    credentials_file: "./credentials.json" # Path to Google Cloud service account JSON key file
+    auto_create_topic: false # Automatically create topics if they don't exist
     location: "asia-southeast1" # Location for BigQuery tables
 
 # LSN (Log Sequence Number) persistence configuration

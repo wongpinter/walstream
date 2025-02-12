@@ -28,6 +28,7 @@ func main() {
 		Level:  logging.Level(cfg.Log.Level),
 		Format: cfg.Log.Format,
 	}
+
 	logger, err := logging.New(loggerConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
@@ -45,7 +46,7 @@ func main() {
 	}
 	defer pipelineManager.Close()
 
-	if err := pipelineManager.RunPipeline(ctx, "default", cfg.GetIncludedTables()); err != nil {
+	if err := pipelineManager.RunPipeline(ctx, "default"); err != nil {
 		if err == context.Canceled {
 			logger.Info().Msg("Pipeline shutdown gracefully")
 			return

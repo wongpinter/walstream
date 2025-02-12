@@ -22,6 +22,11 @@ type InitialSyncer struct {
 	conn   *pgx.Conn
 }
 
+type TableSync struct {
+	Name    string
+	Columns []string
+}
+
 // NewInitialSyncer creates a new InitialSyncer
 func NewInitialSyncer(cfg *config.Config, broker broker.Broker, logger *zerolog.Logger) *InitialSyncer {
 	return &InitialSyncer{
@@ -49,7 +54,7 @@ func (s *InitialSyncer) Start(ctx context.Context) error {
 
 	// Process each table
 	for _, table := range tables {
-		if err := s.syncTable(ctx, table); err != nil {
+		if err := s.syncTable(ctx, table.Name, table.Columns); err != nil {
 			return fmt.Errorf("failed to sync table %s: %w", table, err)
 		}
 	}
@@ -58,14 +63,14 @@ func (s *InitialSyncer) Start(ctx context.Context) error {
 }
 
 // getTables returns a list of tables to sync
-func (s *InitialSyncer) getTables() ([]string, error) {
-	var tables []string
+func (s *InitialSyncer) getTables() ([]TableSync, error) {
+	var tables []TableSync
 	seen := make(map[string]bool)
 
 	// Add tables from configuration
 	for _, table := range s.cfg.Replication.Tables {
 		if table.Name != "" && !seen[table.Name] {
-			tables = append(tables, table.Name)
+			tables = append(tables, TableSync{Name: table.Name, Columns: table.Columns})
 			seen[table.Name] = true
 		}
 	}
@@ -78,7 +83,7 @@ func (s *InitialSyncer) getTables() ([]string, error) {
 }
 
 // syncTable synchronizes a single table
-func (s *InitialSyncer) syncTable(ctx context.Context, tableName string) error {
+func (s *InitialSyncer) syncTable(ctx context.Context, tableName string, columns []string) error {
 	s.logger.Info().Str("table", tableName).Msg("starting initial sync")
 
 	// Get table schema
@@ -87,8 +92,13 @@ func (s *InitialSyncer) syncTable(ctx context.Context, tableName string) error {
 		return fmt.Errorf("failed to get table schema: %w", err)
 	}
 
-	// Build query
 	query := fmt.Sprintf("SELECT * FROM %s", tableName)
+
+	// Build query
+	if len(columns) > 0 {
+		columnsStr := strings.Join(columns, ", ")
+		query = fmt.Sprintf("SELECT %s FROM %s", columnsStr, tableName)
+	}
 
 	// Start transaction with repeatable read to ensure consistent snapshot
 	tx, err := s.conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
@@ -165,6 +175,10 @@ func (s *InitialSyncer) publishBatch(ctx context.Context, tableName string, sche
 			Object:    schema,
 			Timestamp: time.Now(),
 		}
+
+		s.broker.AddTransformer(func(m *model.Message) (interface{}, error) {
+			return m.ToFormat(model.RecordFormat), nil
+		})
 
 		if err := s.broker.Publish(ctx, msg); err != nil {
 			return fmt.Errorf("failed to publish message: %w", err)
