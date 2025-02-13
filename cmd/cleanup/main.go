@@ -15,7 +15,7 @@ import (
 func main() {
 	// Parse command line flags
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
-	dryrun := flag.Bool("dryrun", true, "Run cleanup in dry-run mode")
+	dryrun := flag.Bool("dryrun", false, "Run cleanup in dry-run mode")
 	force := flag.Bool("force", false, "Force cleanup")
 
 	flag.Parse()
