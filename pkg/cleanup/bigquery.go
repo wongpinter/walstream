@@ -60,9 +60,9 @@ func (bc *bigQueryCleaner) ListResources(ctx context.Context) ([]ResourceInfo, e
 
 	// Get configured tables
 	var tableNames []string
-	for _, tablePattern := range bc.config.Replication.Tables {
+	for _, tablePattern := range bc.config.Replication.GetTableNames() {
 		// Extract table name from pattern (e.g., "public.users" -> "users")
-		parts := strings.Split(tablePattern.Name, ".")
+		parts := strings.Split(tablePattern, ".")
 		if len(parts) >= 2 {
 			tableNames = append(tableNames, parts[1])
 		} else {

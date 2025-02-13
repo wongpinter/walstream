@@ -39,6 +39,6 @@ type SubscriptionManagerInterface interface {
 func FormatTopicID(config *config.Config, table string) string {
 	return fmt.Sprintf("%s.%s.%s",
 		config.Broker.PubSub.TopicPrefix,
-		config.Database.Schema,
+		config.Replication.SchemaName,
 		table)
 }
