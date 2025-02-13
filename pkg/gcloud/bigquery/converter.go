@@ -336,7 +336,7 @@ func (c *SchemaConverter) convertTable(ctx context.Context, tableName string, co
 		case "timestamp without time zone", "timestamp with time zone":
 			field.Type = "TIMESTAMP"
 		case "date":
-			field.Type = "DATE"
+			field.Type = "STRING"
 		case "time without time zone", "time with time zone":
 			field.Type = "TIME"
 		case "json", "jsonb":
