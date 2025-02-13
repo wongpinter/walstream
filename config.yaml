@@ -1,6 +1,5 @@
 # Database configuration
 database:
-  schema: public
   host: 35.219.25.99 # PostgreSQL server hostname
   port: 4455 # PostgreSQL server port
   user: odoo # PostgreSQL username
@@ -15,79 +14,11 @@ log:
 
 # Replication configuration
 replication:
-  publication_name: walstreamer_pub # PostgreSQL publication name
-  slot_name: walstreamer_slot # PostgreSQL replication slot name
+  publication: walstreamer_pub # PostgreSQL publication name
+  slot: walstreamer_slot # PostgreSQL replication slot name
   standby_timeout: 10 # Timeout for standby status updates (in seconds)
-
-  # List of tables to replicate with their configurations
-  tables:
-    - name: account_move_line
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: account_move_line
-      columns:
-        [
-          "id",
-          "name",
-          "date",
-          "account_id",
-          "display_type",
-          "date_maturity",
-          "amount_residual",
-          "move_id",
-          "balance",
-          "debit",
-          "credit",
-          "property_unit_id",
-          "partner_id",
-        ]
-    - name: account_account
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: account_account
-      columns: ["id", "code", "name", "account_type"]
-    - name: res_partner
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: res_partner
-      columns: ["id", "name", "email", "phone"]
-    - name: account_move
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: account_move
-      columns:
-        [
-          "id",
-          "name",
-          "unit_id",
-          "state",
-          "payment_state",
-          "move_type",
-          "is_deposit_allocated",
-          "partner_id",
-        ]
-    - name: account_journal
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: account_journal
-      columns: ["id", "name", "type"]
-    - name: account_partial_reconcile
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: account_partial_reconcile
-      columns: ["id", "debit_move_id", "credit_move_id", "amount", "max_date"]
-    - name: propertek_property_unit
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: propertek_property_unit
-      columns: ["id", "name", "floor"]
-    - name: propertek_property_tower
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: propertek_property_tower
-      columns: ["id", "name"]
-    - name: propertek_property
-      operations: ["INSERT", "UPDATE", "DELETE"]
-      topic: propertek_property
-      columns: ["id", "name", "code"]
-
-  # Default operations if not specified in table config
-  default_ops:
-    - INSERT
-    - UPDATE
-    - DELETE
+  initial_sync: true # Whether to perform initial table sync
+  batch_size: 1000 # Number of changes to process in a batch
 
   # Reconnection settings for PostgreSQL
   reconnect:
@@ -95,42 +26,118 @@ replication:
     initial_delay: 1 # Initial delay between reconnection attempts (in seconds)
     max_delay: 30 # Maximum delay between reconnection attempts (in seconds)
 
-  initial_sync: true # Whether to perform initial table sync
-  batch_size: 1000 # Number of changes to process in a batch
+  # List of tables to replicate with their configurations
+  tables:
+    account_move_line:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: account_move_line
+      columns:
+        - id
+        - name
+        - date
+        - account_id
+        - display_type
+        - date_maturity
+        - amount_residual
+        - move_id
+        - balance
+        - debit
+        - credit
+        - property_unit_id
+        - partner_id
+
+    account_account:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: account_account
+      columns:
+        - id
+        - code
+        - name
+        - account_type
+
+    res_partner:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: res_partner
+      columns:
+        - id
+        - name
+        - email
+        - phone
+
+    account_move:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: account_move
+      columns:
+        - id
+        - name
+        - unit_id
+        - state
+        - payment_state
+        - move_type
+        - is_deposit_allocated
+        - partner_id
+
+    account_journal:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: account_journal
+      columns:
+        - id
+        - name
+        - type
+
+    account_partial_reconcile:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: account_partial_reconcile
+      columns:
+        - id
+        - debit_move_id
+        - credit_move_id
+        - amount
+        - max_date
+
+    propertek_property_unit:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: propertek_property_unit
+      columns:
+        - id
+        - name
+        - floor
+
+    propertek_property_tower:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: propertek_property_tower
+      columns:
+        - id
+        - name
+
+    propertek_property:
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      topic: propertek_property
+      columns:
+        - id
+        - name
+        - code
 
 # Message broker configuration
 broker:
-  # Broker type (Options: inmemory, nats, pubsub)
-  # - inmemory: In-memory broker for testing
-  # - nats: NATS message broker
-  # - pubsub: Google Cloud Pub/Sub
-  type: pubsub
-
-  # NATS specific configuration
-  # Required when type is "nats"
-  hosts:
-    - nats://Cosmic-Echo.local:4222
+  type: pubsub # Broker type (Options: inmemory, nats, pubsub)
   topic: sugeng_poc # Default topic name (used for tables without specific topic)
-  username: "" # Optional NATS username
-  password: "" # Optional NATS password
-  write_metadata: false # Whether to write metadata to bigquery
 
   # Google Cloud Pub/Sub specific configuration
-  # Required when type is "pubsub"
   pubsub:
-    project_id: "proper-labs" # Google Cloud project ID
-    topic_prefix: "poc_beta" # Prefix for auto-generated topics (e.g., walstreamer-inventory)
-    credentials_file: "./credentials.json" # Path to Google Cloud service account JSON key file
+    project_id: proper-labs # Google Cloud project ID
+    topic_prefix: poc_beta # Prefix for auto-generated topics
+    credentials_file: ./credentials.json # Path to Google Cloud service account JSON key file
     auto_create_topic: false # Automatically create topics if they don't exist
-    location: "asia-southeast1" # Location for BigQuery tables
+    location: asia-southeast1 # Location for BigQuery tables
 
 # LSN (Log Sequence Number) persistence configuration
 lsn:
   type: file # LSN storage type (file, postgres)
-  path: /tmp/walstreamer/lsn # Path to LSN storage file (required when type is "file")
+  path: /tmp/walstreamer/lsn # Path to LSN storage file
   persist_interval: 5s # How often to persist LSN to storage (in seconds)
 
 # Storage configuration
 storage:
   type: file # Storage type (file)
-  path: /tmp/walstreamer # Path to storage directory (required when type is "file")
+  path: /tmp/walstreamer # Path to storage directory
