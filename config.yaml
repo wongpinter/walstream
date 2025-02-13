@@ -29,6 +29,8 @@ replication:
           "id",
           "name",
           "date",
+          "account_id",
+          "display_type",
           "date_maturity",
           "amount_residual",
           "move_id",
