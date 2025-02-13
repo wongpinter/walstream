@@ -9,7 +9,6 @@ import (
 
 	"repo.nusatek.id/sugeng/walstreamer/broker"
 	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
-	"repo.nusatek.id/sugeng/walstreamer/broker/nats"
 	"repo.nusatek.id/sugeng/walstreamer/broker/pubsub"
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/lsn"
@@ -45,10 +44,9 @@ func New(cfg *config.Config, logger *zerolog.Logger) (*Streamer, error) {
 
 	// Create replication manager
 	replManager := replication.NewManager(replication.Config{
-		PublicationName: cfg.Replication.PublicationName,
-		SlotName:        cfg.Replication.SlotName,
+		PublicationName: cfg.Replication.Publication,
+		SlotName:        cfg.Replication.Slot,
 		IncludedTables:  cfg.GetIncludedTables(),
-		ExcludedTables:  cfg.GetExcludedTables(),
 	})
 
 	return &Streamer{
@@ -86,7 +84,7 @@ func (s *Streamer) Start(ctx context.Context) error {
 				return fmt.Errorf("failed to perform initial sync: %w", err)
 			}
 			// Set initial LSN after sync completes
-			if err := s.storage.Set(s.cfg.Replication.PublicationName, 0); err != nil {
+			if err := s.storage.Set(s.cfg.Replication.Publication, 0); err != nil {
 				return fmt.Errorf("failed to set initial LSN: %w", err)
 			}
 			s.logger.Info().Msg("Initial sync completed")
@@ -143,15 +141,6 @@ func createBroker(cfg *config.Config, logger *zerolog.Logger) (broker.Broker, er
 	}
 
 	switch cfg.Broker.Type {
-	case "nats":
-		natsConfig := nats.Config{
-			URL:      cfg.Broker.Hosts[0],
-			Subject:  cfg.Broker.Topic,
-			Logger:   logger,
-			Username: cfg.Broker.Username,
-			Password: cfg.Broker.Password,
-		}
-		return nats.NewBroker(natsConfig)
 	case "pubsub":
 		pubsubConfig := pubsub.Config{
 			ProjectID:       cfg.Broker.PubSub.ProjectID,
@@ -169,8 +158,8 @@ func createBroker(cfg *config.Config, logger *zerolog.Logger) (broker.Broker, er
 func (s *Streamer) createWALReader(_ context.Context) (*wal.Reader, error) {
 	walConfig := wal.Config{
 		ConnString:            s.cfg.Database.GetReplicationDSN(),
-		PublicationName:       s.cfg.Replication.PublicationName,
-		SlotName:              s.cfg.Replication.SlotName,
+		PublicationName:       s.cfg.Replication.Publication,
+		SlotName:              s.cfg.Replication.Slot,
 		StandbyTimeout:        time.Duration(s.cfg.Replication.StandbyTimeout) * time.Second,
 		Logger:                s.logger,
 		LSNStorage:            s.storage,
@@ -277,8 +266,8 @@ func (s *Streamer) createMessageHandler() func(msg *model.Message) error {
 }
 
 func (s *Streamer) isTableAllowed(tableFullName string) bool {
-	for _, table := range s.cfg.Replication.Tables {
-		if table.Name == tableFullName {
+	for _, table := range s.cfg.Replication.GetTableNames() {
+		if table == tableFullName {
 			return true
 		}
 	}
@@ -286,18 +275,24 @@ func (s *Streamer) isTableAllowed(tableFullName string) bool {
 }
 
 func (s *Streamer) getTableOperations(tableName string) []string {
-	for _, table := range s.cfg.Replication.Tables {
-		if table.Name == tableName {
-			return table.Operations
+	for _, table := range s.cfg.Replication.GetTableNames() {
+		if table == tableName {
+			operations, _ := s.cfg.Replication.GetTableOperations(table)
+			return operations
 		}
 	}
 	return nil
 }
 
 func (s *Streamer) getTableTopic(tableName string) string {
-	for _, table := range s.cfg.Replication.Tables {
-		if table.Name == tableName && table.Topic != "" {
-			return table.Topic
+	for _, table := range s.cfg.Replication.GetTableNames() {
+		tableConf, err := s.cfg.Replication.GetTableConfig(table)
+		if err != nil {
+			continue
+		}
+
+		if table == tableName && tableConf.Topic != "" {
+			return tableConf.Topic
 		}
 	}
 	return ""
@@ -314,9 +309,11 @@ func (s *Streamer) filterColumns(tableFullName string, columns map[string]interf
 }
 
 func (s *Streamer) isColumnAllowed(tableFullName string, column string) bool {
-	for _, table := range s.cfg.Replication.Tables {
-		if table.Name == tableFullName {
-			for _, allowedColumn := range table.Columns {
+	for _, table := range s.cfg.Replication.GetTableNames() {
+		if table == tableFullName {
+			columns, _ := s.cfg.Replication.GetColumnsForTable(table)
+
+			for _, allowedColumn := range columns {
 				if column == allowedColumn {
 					return true
 				}

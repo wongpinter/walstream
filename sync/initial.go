@@ -70,10 +70,15 @@ func (s *InitialSyncer) getTables() ([]TableSync, error) {
 	seen := make(map[string]bool)
 
 	// Add tables from configuration
-	for _, table := range s.cfg.Replication.Tables {
-		if table.Name != "" && !seen[table.Name] && !strings.HasPrefix(table.Name, "!") {
-			tables = append(tables, TableSync{Name: table.Name, Columns: table.Columns})
-			seen[table.Name] = true
+	for _, table := range s.cfg.Replication.GetTableNames() {
+		if table != "" && !seen[table] && !strings.HasPrefix(table, "!") {
+			columns, err := s.cfg.Replication.GetColumnsForTable(table)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get columns for table %s: %w", table, err)
+			}
+
+			tables = append(tables, TableSync{Name: table, Columns: columns})
+			seen[table] = true
 		}
 	}
 

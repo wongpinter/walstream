@@ -32,7 +32,7 @@ func main() {
 
 	// Initialize logger
 	loggerConfig := logging.Config{
-		Level:  logging.Level(cfg.Log.Level),
+		Level:  logging.ParseLevel(cfg.Log.Level),
 		Format: cfg.Log.Format,
 	}
 
@@ -62,4 +62,28 @@ func main() {
 	}
 
 	logger.Info().Msg("Successfully created/updated GCloud resources")
+}
+
+func getConfigFiles(env string, files []string) []string {
+	baseFiles := []string{
+		// "config/database.yaml",
+		// "config/replication.yaml",
+		// "config/broker.yaml",
+		// "config/log.yaml",
+		// "config/lsn.yaml",
+		// "config/storage.yaml",
+	}
+
+	// Add user-specified files
+	baseFiles = append(baseFiles, files...)
+
+	// Add environment-specific overrides
+	switch env {
+	case "dev":
+		baseFiles = append(baseFiles, "config/dev-overrides.yaml")
+	case "prod":
+		baseFiles = append(baseFiles, "config/prod-overrides.yaml")
+	}
+
+	return baseFiles
 }
