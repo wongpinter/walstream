@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog"
 
 	"repo.nusatek.id/sugeng/walstreamer/broker"
@@ -70,7 +71,7 @@ func (s *InitialSyncer) getTables() ([]TableSync, error) {
 
 	// Add tables from configuration
 	for _, table := range s.cfg.Replication.Tables {
-		if table.Name != "" && !seen[table.Name] {
+		if table.Name != "" && !seen[table.Name] && !strings.HasPrefix(table.Name, "!") {
 			tables = append(tables, TableSync{Name: table.Name, Columns: table.Columns})
 			seen[table.Name] = true
 		}
@@ -133,24 +134,7 @@ func (s *InitialSyncer) syncTable(ctx context.Context, tableName string, columns
 		data := make(map[string]interface{})
 		fields := rows.FieldDescriptions()
 		for i, field := range fields {
-			switch field.DataTypeOID {
-			case pgoutput.OIDDate:
-				v, ok := values[i].(time.Time)
-				if ok {
-					data[string(field.Name)] = v.Format("2006-01-02")
-				} else {
-					data[string(field.Name)] = fmt.Sprintf("%v", values[i])
-				}
-			case pgoutput.OIDTimestamp:
-				v, ok := values[i].(time.Time)
-				if ok {
-					data[string(field.Name)] = v.Format("2006-01-02 15:04:05.999999")
-				} else {
-					data[string(field.Name)] = fmt.Sprintf("%v", values[i])
-				}
-			default:
-				data[string(field.Name)] = values[i]
-			}
+			s.parseValur(field, values, i, data)
 		}
 
 		batch = append(batch, data)
@@ -178,6 +162,28 @@ func (s *InitialSyncer) syncTable(ctx context.Context, tableName string, columns
 		Msg("completed initial sync")
 
 	return tx.Commit(ctx)
+}
+
+// parseValur parses a value based on its data type
+func (*InitialSyncer) parseValur(field pgconn.FieldDescription, values []any, i int, data map[string]interface{}) {
+	switch field.DataTypeOID {
+	case pgoutput.OIDDate:
+		v, ok := values[i].(time.Time)
+		if ok {
+			data[string(field.Name)] = v.Format("2006-01-02")
+		} else {
+			data[string(field.Name)] = fmt.Sprintf("%v", values[i])
+		}
+	case pgoutput.OIDTimestamp:
+		v, ok := values[i].(time.Time)
+		if ok {
+			data[string(field.Name)] = v.Format("2006-01-02 15:04:05.999999")
+		} else {
+			data[string(field.Name)] = fmt.Sprintf("%v", values[i])
+		}
+	default:
+		data[string(field.Name)] = values[i]
+	}
 }
 
 // publishBatch publishes a batch of records
