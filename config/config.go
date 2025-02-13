@@ -83,6 +83,15 @@ func (c *ReplicationConfig) GetTableConfig(tableName string) (*TableConfig, erro
 	return &tableConfig, nil
 }
 
+// getTableOperations returns the list of operations for a specific table
+func (c *ReplicationConfig) GetTableOperations(tableName string) ([]string, error) {
+	tableConfig, exists := c.Tables[tableName]
+	if !exists {
+		return nil, fmt.Errorf("table %s not found in replication configuration", tableName)
+	}
+	return tableConfig.Operations, nil
+}
+
 // IsOperationAllowed checks if a specific operation is allowed for a table
 func (c *ReplicationConfig) IsOperationAllowed(tableName string, operation string) (bool, error) {
 	tableConfig, exists := c.Tables[tableName]

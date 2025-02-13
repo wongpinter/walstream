@@ -57,6 +57,20 @@ func NewPipeline(cfg *config.Config, logger *logging.Logger, opts Options) (*Pip
 	}, nil
 }
 
+// Cleanup performs the cleanup of resources based on the provided configuration and options.
+func Cleanup(cfg *config.Config, logger *logging.Logger, opts Options) error {
+	pipeline, err := NewPipeline(cfg, logger, opts)
+	if err != nil {
+		return fmt.Errorf("failed to create cleanup pipeline: %w", err)
+	}
+
+	if err := pipeline.Run(context.Background()); err != nil {
+		return fmt.Errorf("failed to run cleanup pipeline: %w", err)
+	}
+
+	return nil
+}
+
 // Run executes the cleanup pipeline
 func (p *Pipeline) Run(ctx context.Context) error {
 	// Step 1: List all resources

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"repo.nusatek.id/sugeng/walstreamer/config"
@@ -18,8 +19,14 @@ func main() {
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
 	flag.Parse()
 
+	files := strings.Split(*configFile, ",")
+
 	// Load configuration
-	cfg, err := config.Load(*configFile)
+	env := "dev" // or "prod"
+	configFiles := getConfigFiles(env, files)
+
+	// Load configuration
+	cfg, err := config.Load(configFiles)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
 		os.Exit(1)
@@ -65,4 +72,28 @@ func main() {
 	if err := s.Start(ctx); err != nil {
 		logger.Fatal().Err(err).Msg("Streaming failed")
 	}
+}
+
+func getConfigFiles(env string, files []string) []string {
+	baseFiles := []string{
+		// "config/database.yaml",
+		// "config/replication.yaml",
+		// "config/broker.yaml",
+		// "config/log.yaml",
+		// "config/lsn.yaml",
+		// "config/storage.yaml",
+	}
+
+	// Add user-specified files
+	baseFiles = append(baseFiles, files...)
+
+	// Add environment-specific overrides
+	switch env {
+	case "dev":
+		baseFiles = append(baseFiles, "config/dev-overrides.yaml")
+	case "prod":
+		baseFiles = append(baseFiles, "config/prod-overrides.yaml")
+	}
+
+	return baseFiles
 }
