@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/logging"
@@ -14,17 +15,20 @@ import (
 
 func main() {
 	// Parse command line flags
-	configFile := flag.String("config", "config.yaml", "Path to configuration file")
+	configFile := flag.String("config", "config.yaml", "Comma separated list of config files")
 	dryrun := flag.Bool("dryrun", false, "Run cleanup in dry-run mode")
 	force := flag.Bool("force", false, "Force cleanup")
-
 	flag.Parse()
 
+	files := strings.Split(*configFile, ",")
+
 	// Load configuration
-	cfg, err := config.Load(*configFile)
+	env := "dev" // or "prod"
+	configFiles := getConfigFiles(env, files)
+
+	cfg, err := config.Load(configFiles)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 	}
 
 	// Initialize logger
@@ -52,8 +56,8 @@ func main() {
 
 	// Create replication manager
 	replManager := replication.NewManager(replication.Config{
-		PublicationName: cfg.Replication.PublicationName,
-		SlotName:        cfg.Replication.SlotName,
+		PublicationName: cfg.Replication.Publication,
+		SlotName:        cfg.Replication.Slot,
 	})
 
 	// Connect to database
@@ -64,8 +68,8 @@ func main() {
 
 	// Clean up resources
 	logger.Info().
-		Str("publication", cfg.Replication.PublicationName).
-		Str("slot", cfg.Replication.SlotName).
+		Str("publication", cfg.Replication.Publication).
+		Str("slot", cfg.Replication.Slot).
 		Msg("Cleaning up replication resources")
 
 	if *dryrun {
@@ -75,4 +79,28 @@ func main() {
 	}
 
 	logger.Info().Msg("Successfully cleaned up replication resources")
+}
+
+func getConfigFiles(env string, files []string) []string {
+	baseFiles := []string{
+		// "config/database.yaml",
+		// "config/replication.yaml",
+		// "config/broker.yaml",
+		// "config/log.yaml",
+		// "config/lsn.yaml",
+		// "config/storage.yaml",
+	}
+
+	// Add user-specified files
+	baseFiles = append(baseFiles, files...)
+
+	// Add environment-specific overrides
+	switch env {
+	case "dev":
+		baseFiles = append(baseFiles, "config/dev-overrides.yaml")
+	case "prod":
+		baseFiles = append(baseFiles, "config/prod-overrides.yaml")
+	}
+
+	return baseFiles
 }

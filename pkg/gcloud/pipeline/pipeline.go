@@ -158,11 +158,17 @@ func (p *Pipeline) Close() error {
 func (p *Pipeline) createSchemaTables() []bigquery.SchemaTable {
 	tables := make([]bigquery.SchemaTable, 0)
 
-	for _, tc := range p.config.Replication.Tables {
-		if !strings.HasPrefix(tc.Name, "!") && tc.Name != "" {
+	for _, table := range p.config.Replication.GetTableNames() {
+		if !strings.HasPrefix(table, "!") && table != "" {
+			columns, err := p.config.Replication.GetColumnsForTable(table)
+			if err != nil {
+				p.logger.Error().Str("table", table).Msg("Failed to get columns for table")
+				continue
+			}
+
 			tables = append(tables, bigquery.SchemaTable{
-				Name:    tc.Name,
-				Columns: tc.Columns,
+				Name:    table,
+				Columns: columns,
 			})
 		}
 	}

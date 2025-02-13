@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"repo.nusatek.id/sugeng/walstreamer/config"
 	"repo.nusatek.id/sugeng/walstreamer/logging"
@@ -16,8 +17,14 @@ func main() {
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
 	flag.Parse()
 
+	files := strings.Split(*configFile, ",")
+
 	// Load configuration
-	cfg, err := config.Load(*configFile)
+	env := "dev" // or "prod"
+	configFiles := getConfigFiles(env, files)
+
+	// Load configuration
+	cfg, err := config.Load(configFiles)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
 		os.Exit(1)

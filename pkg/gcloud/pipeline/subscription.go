@@ -80,7 +80,7 @@ func (sm *pubSubSubscriptionManager) CreateSubscription(ctx context.Context, con
 				sm.config.Broker.Topic,
 				table),
 			RetentionDuration: DefaultRetentionDuration,
-			WriteMetadata:     sm.config.Broker.WriteMetadata,
+			WriteMetadata:     false,
 		}
 
 		if err := bqSub.CreateSubscription(ctx, bqSubCfg); err != nil {

@@ -54,24 +54,27 @@ log:
 	}
 
 	// Test loading from file
-	cfg, err := Load(configFile)
+	cfg, err := Load([]string{configFile})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
 	// Verify loaded values
-	if cfg.Database.Host != "localhost" {
-		t.Errorf("expected host localhost, got %s", cfg.Database.Host)
-	}
-	if cfg.Database.Port != 5432 {
-		t.Errorf("expected port 5432, got %d", cfg.Database.Port)
-	}
-	if cfg.Replication.SlotName != "walstreamer_slot" {
-		t.Errorf("expected slot_name walstreamer_slot, got %s", cfg.Replication.SlotName)
-	}
-	if time.Duration(cfg.Replication.StandbyTimeout) != 10*time.Second {
-		t.Errorf("expected standby_timeout 10s, got %v", cfg.Replication.StandbyTimeout)
-	}
+    if cfg.Database.Host != "localhost" {
+        t.Errorf("expected host localhost, got %s", cfg.Database.Host)
+    }
+    if cfg.Database.Port != 5432 {
+        t.Errorf("expected port 5432, got %d", cfg.Database.Port)
+    }
+    if cfg.Replication.Slot != "walstreamer_slot" {
+        t.Errorf("expected slot walstreamer_slot, got %s", cfg.Replication.Slot)
+    }
+    if cfg.Replication.StandbyTimeout != 10 {
+        t.Errorf("expected standby_timeout 10, got %v", cfg.Replication.StandbyTimeout)
+    }
+    if cfg.Storage.Type != "file" {
+        t.Errorf("expected storage type file, got %s", cfg.Storage.Type)
+    }
 
 	// Test environment variable override
 	os.Setenv("WALSTREAMER_DATABASE_HOST", "testhost")
@@ -81,7 +84,7 @@ log:
 		os.Unsetenv("WALSTREAMER_DATABASE_PORT")
 	}()
 
-	cfg, err = Load(configFile)
+	cfg, err = Load([]string{configFile})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -112,14 +115,24 @@ func TestConfig_Validate(t *testing.T) {
 					SSLMode:  "disable",
 				},
 				Replication: ReplicationConfig{
-					SlotName:        "walstreamer_slot",
-					PublicationName: "walstreamer_pub",
-					StandbyTimeout:  int(Duration(10 * time.Second)),
+					Slot:           "walstreamer_slot",
+					Publication:    "walstreamer_pub",
+					StandbyTimeout: 10,
+                    InitialSync:    false,
+                    BatchSize: 1000,
+                    Reconnect: ReconnectConfig{
+                        MaxAttempts:  3,
+                        InitialDelay: 5,
+                    },
+                    SchemaName: "public",
 				},
-				Broker: BrokerConfig{
-					Type:  "inmemory",
-					Topic: "walstreamer",
-				},
+                Broker: BrokerConfig{
+                    Type:  "inmemory",
+                    Topic: "walstreamer",
+                },
+                Storage: StorageConfig{
+                    Type: "file",
+                },
 				LSN: LSNConfig{
 					Type:            "file",
 					Path:            "./data/lsn",
@@ -132,15 +145,32 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: false,
 		},
-		{
-			name: "invalid database config",
-			cfg: Config{
-				Database: DatabaseConfig{
-					Host: "", // Missing host
-				},
-			},
-			wantErr: true,
-		},
+        {
+            name: "invalid database config",
+            cfg: Config{
+                Database: DatabaseConfig{
+                    Host: "", // Missing host
+                },
+            },
+            wantErr: true,
+        },
+        {
+            name: "invalid storage type",
+            cfg: Config{
+                Database: DatabaseConfig{
+                    Host:     "localhost",
+                    Port:     5432,
+                    User:     "postgres",
+                    Password: "postgres",
+                    DBName:   "postgres",
+                    SSLMode:  "disable",
+                },
+                Storage: StorageConfig{
+                    Type: "invalid",
+                },
+            },
+            wantErr: true,
+        },
 		{
 			name: "invalid broker type",
 			cfg: Config{

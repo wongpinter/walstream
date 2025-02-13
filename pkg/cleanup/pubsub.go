@@ -58,7 +58,7 @@ func isValidPubSubName(name string, isSubscription bool) bool {
 // isDebeziumTopic checks if a topic matches the Debezium configuration pattern
 func (pc *pubSubCleaner) isDebeziumTopic(topicID string) bool {
 	prefix := pc.config.Broker.PubSub.TopicPrefix
-	schema := pc.config.Database.Schema
+	schema := pc.config.Replication.SchemaName
 	pattern := fmt.Sprintf("%s.%s.", prefix, schema)
 	return strings.HasPrefix(topicID, pattern)
 }
@@ -74,8 +74,8 @@ func (pc *pubSubCleaner) getTableFromTopicID(topicID string) string {
 
 // isConfiguredTable checks if a table is in the configured include list
 func (pc *pubSubCleaner) isConfiguredTable(tableName string) bool {
-	for _, pattern := range pc.config.Replication.Tables {
-		parts := strings.Split(pattern.Name, ".")
+	for _, pattern := range pc.config.Replication.GetTableNames() {
+		parts := strings.Split(pattern, ".")
 		if len(parts) >= 2 {
 			if parts[1] == tableName {
 				return true
