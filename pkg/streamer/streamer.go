@@ -251,11 +251,11 @@ func (s *Streamer) createMessageHandler() func(msg *model.Message) error {
 			return fmt.Errorf("failed to publish message: %w", err)
 		}
 
-		s.logger.Info().Str("operation", msg.Operation).Str("table", msg.Table).Msg("Published message")
+		s.logger.Info().Str("operation", msg.Operation).Str("table", msg.Table).Any("message", msg.After).Msg("Published message")
 
 		// Print broker metrics for debugging
 		metrics := s.messageBroker.Metrics()
-		s.logger.Info().
+		s.logger.Debug().
 			Int64("messages_published", metrics.MessagesPublished).
 			Int64("messages_failed", metrics.MessagesFailed).
 			Int("buffer_size", metrics.BufferSize).

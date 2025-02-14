@@ -68,7 +68,7 @@ var cleanupCmd = &cobra.Command{
 	Short: "Clean up Walstreamer resources in Google Cloud",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Get config
-		cfg, err := config.Load([]string{})
+		cfg, err := config.Load([]string{viper.ConfigFileUsed()})
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}
@@ -112,7 +112,7 @@ var streamCmd = &cobra.Command{
 	Short: "Start the WAL streamer",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Get config
-		cfg, err := config.Load([]string{})
+		cfg, err := config.Load([]string{viper.ConfigFileUsed()})
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}
@@ -192,7 +192,7 @@ var gcloudCmd = &cobra.Command{
 	Short: "Set up Google Cloud resources",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Get config
-		cfg, err := config.Load([]string{})
+		cfg, err := config.Load([]string{viper.ConfigFileUsed()})
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}

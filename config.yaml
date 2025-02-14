@@ -16,6 +16,7 @@ log:
 replication:
   publication: walstreamer_pub # PostgreSQL publication name
   slot: walstreamer_slot # PostgreSQL replication slot name
+  schema_name: public # PostgreSQL schema name
   standby_timeout: 10 # Timeout for standby status updates (in seconds)
   initial_sync: true # Whether to perform initial table sync
   batch_size: 1000 # Number of changes to process in a batch
@@ -121,12 +122,12 @@ replication:
 # Message broker configuration
 broker:
   type: pubsub # Broker type (Options: inmemory, nats, pubsub)
-  topic: sugeng_poc # Default topic name (used for tables without specific topic)
+  topic: dev_beta # Default topic name (used for tables without specific topic)
 
   # Google Cloud Pub/Sub specific configuration
   pubsub:
     project_id: proper-labs # Google Cloud project ID
-    topic_prefix: poc_beta # Prefix for auto-generated topics
+    topic_prefix: poc_dev_beta # Prefix for auto-generated topics
     credentials_file: ./credentials.json # Path to Google Cloud service account JSON key file
     auto_create_topic: false # Automatically create topics if they don't exist
     location: asia-southeast1 # Location for BigQuery tables
@@ -134,10 +135,10 @@ broker:
 # LSN (Log Sequence Number) persistence configuration
 lsn:
   type: file # LSN storage type (file, postgres)
-  path: /tmp/walstreamer/lsn # Path to LSN storage file
+  path: ./history # Path to LSN storage file
   persist_interval: 5s # How often to persist LSN to storage (in seconds)
 
 # Storage configuration
 storage:
   type: file # Storage type (file)
-  path: /tmp/walstreamer # Path to storage directory
+  path: ./history # Path to storage directory
