@@ -216,6 +216,9 @@ func (c *ReplicationConfig) Validate() error {
 	if c.Slot == "" {
 		return fmt.Errorf("slot name is required")
 	}
+	if c.SchemaName == "" {
+		return fmt.Errorf("schema name is required")
+	}
 	if c.StandbyTimeout <= 0 {
 		return fmt.Errorf("standby timeout must be positive")
 	}
