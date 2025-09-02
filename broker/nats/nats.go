@@ -9,8 +9,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 
-	"repo.nusatek.id/sugeng/walstreamer/broker"
-	"repo.nusatek.id/sugeng/walstreamer/model"
+	"github.com/wongpinter/walstreamer/broker"
+	"github.com/wongpinter/walstreamer/model"
 )
 
 // Config holds configuration for NATS broker

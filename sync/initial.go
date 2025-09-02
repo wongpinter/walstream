@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog"
 
-	"repo.nusatek.id/sugeng/walstreamer/broker"
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/decoder/pgoutput"
-	"repo.nusatek.id/sugeng/walstreamer/model"
+	"github.com/wongpinter/walstreamer/broker"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/decoder/pgoutput"
+	"github.com/wongpinter/walstreamer/model"
 )
 
 // InitialSyncer handles the initial synchronization of existing data

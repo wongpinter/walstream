@@ -302,7 +302,7 @@ Walstreamer is designed to be resilient to common issues:
 1.  **Clone the repository:**
 
     ```bash
-    git clone https://repo.nusatek.id/sugeng/walstreamer.git
+    git clone https://github.com/wongpinter/walstreamer.git
     cd walstreamer
     ```
 

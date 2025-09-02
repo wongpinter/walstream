@@ -1,4 +1,4 @@
-module repo.nusatek.id/sugeng/walstreamer
+module github.com/wongpinter/walstreamer
 
 go 1.23.5
 

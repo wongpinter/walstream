@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/logging"
-	"repo.nusatek.id/sugeng/walstreamer/pkg/gcloud/pubsub"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/pkg/gcloud/pubsub"
 )
 
 // pubSubSubscriptionManager implements SubscriptionManagerInterface

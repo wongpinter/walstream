@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/logging"
 )
 
 // Pipeline represents a cleanup pipeline for removing infrastructure resources

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"repo.nusatek.id/sugeng/walstreamer/model"
+	"github.com/wongpinter/walstreamer/model"
 )
 
 var (

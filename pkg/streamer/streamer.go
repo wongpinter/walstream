@@ -7,15 +7,15 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"repo.nusatek.id/sugeng/walstreamer/broker"
-	"repo.nusatek.id/sugeng/walstreamer/broker/inmemory"
-	"repo.nusatek.id/sugeng/walstreamer/broker/pubsub"
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/lsn"
-	"repo.nusatek.id/sugeng/walstreamer/model"
-	"repo.nusatek.id/sugeng/walstreamer/replication"
-	"repo.nusatek.id/sugeng/walstreamer/sync"
-	"repo.nusatek.id/sugeng/walstreamer/wal"
+	"github.com/wongpinter/walstreamer/broker"
+	"github.com/wongpinter/walstreamer/broker/inmemory"
+	"github.com/wongpinter/walstreamer/broker/pubsub"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/lsn"
+	"github.com/wongpinter/walstreamer/model"
+	"github.com/wongpinter/walstreamer/replication"
+	"github.com/wongpinter/walstreamer/sync"
+	"github.com/wongpinter/walstreamer/wal"
 )
 
 // Streamer handles the WAL streaming process

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
-	"repo.nusatek.id/sugeng/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/logging"
 )
 
 const (
