@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/logging"
-	"repo.nusatek.id/sugeng/walstreamer/pkg/gcloud/bigquery"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/pkg/gcloud/bigquery"
 )
 
 const (

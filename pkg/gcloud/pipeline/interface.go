@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/pkg/gcloud/bigquery"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/pkg/gcloud/bigquery"
 )
 
 const (

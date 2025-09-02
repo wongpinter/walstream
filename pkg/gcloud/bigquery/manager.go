@@ -8,7 +8,7 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 
-	"repo.nusatek.id/sugeng/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/logging"
 )
 
 // Manager handles BigQuery operations

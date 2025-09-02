@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"repo.nusatek.id/sugeng/walstreamer/model"
+	"github.com/wongpinter/walstreamer/model"
 )
 
 // PostgreSQL OIDs for common types

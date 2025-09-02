@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/rs/zerolog"
 
-	"repo.nusatek.id/sugeng/walstreamer/model"
+	"github.com/wongpinter/walstreamer/model"
 )
 
 // Fetcher is responsible for fetching and caching table schemas

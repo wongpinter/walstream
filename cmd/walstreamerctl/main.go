@@ -11,11 +11,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/logging"
-	"repo.nusatek.id/sugeng/walstreamer/pkg/cleanup"
-	"repo.nusatek.id/sugeng/walstreamer/pkg/gcloud/pipeline"
-	"repo.nusatek.id/sugeng/walstreamer/pkg/streamer"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/pkg/cleanup"
+	"github.com/wongpinter/walstreamer/pkg/gcloud/pipeline"
+	"github.com/wongpinter/walstreamer/pkg/streamer"
 )
 
 func main() {

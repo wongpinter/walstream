@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"repo.nusatek.id/sugeng/walstreamer/config"
-	"repo.nusatek.id/sugeng/walstreamer/logging"
-	"repo.nusatek.id/sugeng/walstreamer/pkg/cleanup"
-	"repo.nusatek.id/sugeng/walstreamer/replication"
+	"github.com/wongpinter/walstreamer/config"
+	"github.com/wongpinter/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/pkg/cleanup"
+	"github.com/wongpinter/walstreamer/replication"
 )
 
 func main() {

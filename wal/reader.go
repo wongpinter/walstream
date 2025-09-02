@@ -14,10 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/rs/zerolog"
 
-	"repo.nusatek.id/sugeng/walstreamer/decoder/pgoutput"
-	"repo.nusatek.id/sugeng/walstreamer/lsn"
-	"repo.nusatek.id/sugeng/walstreamer/model"
-	"repo.nusatek.id/sugeng/walstreamer/schema"
+	"github.com/wongpinter/walstreamer/decoder/pgoutput"
+	"github.com/wongpinter/walstreamer/lsn"
+	"github.com/wongpinter/walstreamer/model"
+	"github.com/wongpinter/walstreamer/schema"
 )
 
 // Reader is responsible for reading and processing WAL entries

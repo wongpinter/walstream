@@ -12,8 +12,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/rs/zerolog/log"
 
-	"repo.nusatek.id/sugeng/walstreamer/broker"
-	"repo.nusatek.id/sugeng/walstreamer/model"
+	"github.com/wongpinter/walstreamer/broker"
+	"github.com/wongpinter/walstreamer/model"
 )
 
 // RabbitMQBroker implements the broker.Broker interface for RabbitMQ

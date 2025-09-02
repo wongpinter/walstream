@@ -9,7 +9,7 @@ import (
 	"cloud.google.com/go/pubsub"
 	"google.golang.org/api/option"
 
-	"repo.nusatek.id/sugeng/walstreamer/logging"
+	"github.com/wongpinter/walstreamer/logging"
 )
 
 // Manager handles Google Cloud Pub/Sub operations

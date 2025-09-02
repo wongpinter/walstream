@@ -11,8 +11,8 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/api/option"
 
-	"repo.nusatek.id/sugeng/walstreamer/broker"
-	"repo.nusatek.id/sugeng/walstreamer/model"
+	"github.com/wongpinter/walstreamer/broker"
+	"github.com/wongpinter/walstreamer/model"
 )
 
 // Config holds configuration for Google Cloud Pub/Sub broker
